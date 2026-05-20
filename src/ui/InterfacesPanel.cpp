@@ -8,6 +8,7 @@
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
+#include <QSet>
 #include <memory>
 #include <utility>
 
@@ -26,7 +27,8 @@ InterfacesPanel::InterfacesPanel(QWidget* parent)
     : QGroupBox(parent) {
     setTitle(tr("Network interfaces"));
     setCheckable(true);
-    setChecked(false);
+    setChecked(true);
+    setMinimumHeight(220);
 
     auto* layout = makeQtOwned<QVBoxLayout>(this);
     table_ = makeQtOwned<QTableWidget>(0, 7, this);
@@ -52,14 +54,27 @@ void InterfacesPanel::setInterfaces(const QVector<gpd::core::NetworkInterfaceInf
     for (int row = 0; row < interfaces.size(); ++row) {
         const auto& item = interfaces[row];
 
+        QSet<QString> uniqIp;
+        for (const auto& ip : item.unicastAddresses) {
+            if (!ip.isEmpty() && ip != QStringLiteral("0.0.0.0") && ip != QStringLiteral("::")) {
+                uniqIp.insert(ip);
+            }
+        }
+        QSet<QString> uniqGw;
+        for (const auto& gw : item.gatewayAddresses) {
+            if (!gw.isEmpty()) {
+                uniqGw.insert(gw);
+            }
+        }
+
         auto* friendly = makeQtOwned<QTableWidgetItem>(item.friendlyName);
         friendly->setIcon(KindIcon::make(item.kind));
         table_->setItem(row, 0, friendly);
         table_->setItem(row, 1, makeQtOwned<QTableWidgetItem>(item.description));
         table_->setItem(row, 2, makeQtOwned<QTableWidgetItem>(gpd::core::interfaceKindToString(item.kind)));
         table_->setItem(row, 3, makeQtOwned<QTableWidgetItem>(item.operStatus == 1U ? QStringLiteral("Up") : QStringLiteral("Down")));
-        table_->setItem(row, 4, makeQtOwned<QTableWidgetItem>(item.unicastAddresses.join(QStringLiteral(", "))));
-        table_->setItem(row, 5, makeQtOwned<QTableWidgetItem>(item.gatewayAddresses.join(QStringLiteral(", "))));
+        table_->setItem(row, 4, makeQtOwned<QTableWidgetItem>(QStringList(uniqIp.cbegin(), uniqIp.cend()).join(QStringLiteral(", "))));
+        table_->setItem(row, 5, makeQtOwned<QTableWidgetItem>(QStringList(uniqGw.cbegin(), uniqGw.cend()).join(QStringLiteral(", "))));
         table_->setItem(row, 6, makeQtOwned<QTableWidgetItem>(QString::number(item.ifIndex)));
     }
 }

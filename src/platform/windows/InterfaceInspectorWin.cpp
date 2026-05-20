@@ -14,23 +14,14 @@
 
 namespace {
 
-QString sockaddrToString(const SOCKADDR* address) {
-    if (address == nullptr) {
+QString sockaddrToString(const SOCKADDR* address, const int addressLength) {
+    if (address == nullptr || addressLength <= 0) {
         return QString();
     }
 
     wchar_t buffer[128]{};
     DWORD length = static_cast<DWORD>(std::size(buffer));
-    int sockLen = 0;
-    if (address->sa_family == AF_INET) {
-        sockLen = sizeof(SOCKADDR_IN);
-    } else if (address->sa_family == AF_INET6) {
-        sockLen = sizeof(SOCKADDR_IN6);
-    } else {
-        return QString();
-    }
-
-    if (WSAAddressToStringW(const_cast<LPSOCKADDR>(address), sockLen, nullptr, buffer, &length) != 0) {
+    if (WSAAddressToStringW(const_cast<LPSOCKADDR>(address), addressLength, nullptr, buffer, &length) != 0) {
         return QString();
     }
     return QString::fromWCharArray(buffer);
@@ -91,14 +82,14 @@ QVector<gpd::core::NetworkInterfaceInfo> InterfaceInspectorWin::listInterfaces()
         info.dnsSuffix = adapter->DnsSuffix != nullptr ? QString::fromWCharArray(adapter->DnsSuffix) : QString();
 
         for (auto* unicast = adapter->FirstUnicastAddress; unicast != nullptr; unicast = unicast->Next) {
-            const auto ip = sockaddrToString(unicast->Address.lpSockaddr);
+            const auto ip = sockaddrToString(unicast->Address.lpSockaddr, unicast->Address.iSockaddrLength);
             if (!ip.isEmpty()) {
                 info.unicastAddresses.push_back(ip);
             }
         }
 
         for (auto* gateway = adapter->FirstGatewayAddress; gateway != nullptr; gateway = gateway->Next) {
-            const auto gw = sockaddrToString(gateway->Address.lpSockaddr);
+            const auto gw = sockaddrToString(gateway->Address.lpSockaddr, gateway->Address.iSockaddrLength);
             if (!gw.isEmpty()) {
                 info.gatewayAddresses.push_back(gw);
             }
