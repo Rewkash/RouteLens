@@ -1,0 +1,10 @@
+{
+  "name": "routelens",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "qtbase",
+    "qtcharts",
+    "sqlite3",
+    "libmaxminddb"
+  ]
+}

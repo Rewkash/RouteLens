@@ -1,0 +1,39 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup Ninja
+        uses: seanmiddleditch/gha-setup-ninja@master
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: vcpkg.json
+
+      - name: Configure
+        run: cmake --preset windows-msvc-release -DGPD_DEPLOY_QT=OFF
+
+      - name: Build
+        run: cmake --build --preset windows-msvc-release --config Release
+
+      - name: Smoke test
+        run: ctest --test-dir build/windows-msvc-release --output-on-failure -C Release

@@ -1,0 +1,123 @@
+cmake_minimum_required(VERSION 3.21)
+
+project(RouteLens VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+option(GPD_BUILD_TESTS "Build smoke tests" ON)
+option(GPD_DEPLOY_QT "Run windeployqt after building the GUI executable" ON)
+
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Network Charts Concurrent)
+
+qt_standard_project_setup()
+
+set(GPD_SOURCES
+    src/app/Application.cpp
+    src/app/Logger.cpp
+    src/platform/windows/ConnectionScannerWin.cpp
+    src/platform/windows/ProcessMonitorWin.cpp
+    src/platform/windows/WinapiUtils.cpp
+    src/ui/MainWindow.cpp
+    src/ui/VerdictBadge.cpp
+)
+
+set(GPD_HEADERS
+    src/app/Application.h
+    src/app/Logger.h
+    src/core/Models.h
+    src/platform/windows/ConnectionScannerWin.h
+    src/platform/windows/ProcessMonitorWin.h
+    src/platform/windows/WinapiUtils.h
+    src/ui/MainWindow.h
+    src/ui/VerdictBadge.h
+)
+
+add_library(RouteLensApp STATIC
+    ${GPD_SOURCES}
+    ${GPD_HEADERS}
+)
+
+target_include_directories(RouteLensApp PUBLIC src resources)
+
+target_compile_definitions(RouteLensApp PUBLIC
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    QT_NO_KEYWORDS
+)
+
+if(MSVC)
+    target_compile_options(RouteLensApp PRIVATE /W4 /permissive- /EHsc /utf-8)
+else()
+    target_compile_options(RouteLensApp PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+target_link_libraries(RouteLensApp PUBLIC
+    Qt6::Core
+    Qt6::Widgets
+    Qt6::Network
+    Qt6::Charts
+    Qt6::Concurrent
+    advapi32
+    iphlpapi
+    shell32
+    ws2_32
+)
+
+qt_add_executable(RouteLens WIN32
+    src/app/main.cpp
+)
+
+target_link_libraries(RouteLens PRIVATE RouteLensApp)
+
+if(MSVC)
+    target_link_options(RouteLens PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+else()
+    target_sources(RouteLens PRIVATE resources/app.rc)
+endif()
+
+set_target_properties(RouteLens PROPERTIES
+    OUTPUT_NAME "RouteLens"
+    VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:RouteLens>"
+)
+
+if(WIN32 AND GPD_DEPLOY_QT)
+    get_target_property(_qt_qmake_executable Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qt_qmake_executable}" DIRECTORY)
+    find_program(WINDEPLOYQT_EXECUTABLE
+        NAMES windeployqt windeployqt.exe
+        HINTS "${_qt_bin_dir}"
+    )
+
+    if(WINDEPLOYQT_EXECUTABLE)
+        add_custom_command(
+            TARGET RouteLens
+            POST_BUILD
+            COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+                    --no-compiler-runtime
+                    "$<TARGET_FILE:RouteLens>"
+            COMMENT "Deploying Qt runtime for RouteLens.exe"
+            VERBATIM
+        )
+    else()
+        message(WARNING "windeployqt was not found. Runtime deployment is skipped.")
+    endif()
+endif()
+
+if(GPD_BUILD_TESTS)
+    enable_testing()
+    qt_add_executable(RouteLensSmoke
+        tests/smoke.cpp
+    )
+    target_link_libraries(RouteLensSmoke PRIVATE RouteLensApp)
+    add_test(NAME smoke_basic COMMAND RouteLensSmoke)
+    get_target_property(_qt_core_location Qt6::Core IMPORTED_LOCATION_RELEASE)
+    if(NOT _qt_core_location)
+        get_target_property(_qt_core_location Qt6::Core IMPORTED_LOCATION)
+    endif()
+    get_filename_component(_qt_runtime_dir "${_qt_core_location}" DIRECTORY)
+    set_tests_properties(smoke_basic PROPERTIES
+        ENVIRONMENT "PATH=${_qt_runtime_dir};$ENV{PATH}"
+    )
+endif()
