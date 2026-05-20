@@ -5,6 +5,7 @@
 #include <QMainWindow>
 #include <QHash>
 #include <QFutureWatcher>
+#include <Qt>
 
 #include <cstdint>
 #include <memory>
@@ -14,6 +15,7 @@ class QPushButton;
 class QTableWidget;
 class QTimer;
 class QLabel;
+class QAction;
 
 namespace gpd::platform {
 class ProcessMonitorWin;
@@ -25,6 +27,14 @@ class EtwNetworkTap;
 
 namespace gpd::core {
 class UdpFlowAggregator;
+class GeoIpResolver;
+class PingScheduler;
+struct TargetEndpoint;
+}
+
+namespace gpd::platform {
+class PingProbeWin;
+class TcpPingProbeWin;
 }
 
 namespace gpd::ui {
@@ -40,6 +50,7 @@ struct RefreshResult {
     std::uint32_t selectedPid{0};
     int rawConnectionCount{0};
     bool etwRunning{false};
+    bool geoReady{false};
 };
 
 class MainWindow final : public QMainWindow {
@@ -57,6 +68,9 @@ private:
     void fillConnectionRow(int row, const gpd::core::ConnectionInfo& connection);
     void applyRefreshResult(const RefreshResult& result);
     void updateCachedInterfaces(bool forceUpdate);
+    void configureGeoIp();
+    void restoreTableSortState();
+    void persistTableSortState() const;
 
     QComboBox* processCombo_{nullptr};
     QPushButton* refreshButton_{nullptr};
@@ -65,6 +79,8 @@ private:
     QTableWidget* connectionTable_{nullptr};
     InterfacesPanel* interfacesPanel_{nullptr};
     QLabel* etwStatusLabel_{nullptr};
+    QLabel* geoStatusLabel_{nullptr};
+    QAction* configureGeoIpAction_{nullptr};
     QTimer* refreshTimer_{nullptr};
     QTimer* pruneTimer_{nullptr};
     bool monitoring_{false};
@@ -77,8 +93,14 @@ private:
     std::unique_ptr<gpd::platform::RouteResolverWin> routeResolver_;
     std::unique_ptr<gpd::platform::EtwNetworkTap> etwTap_;
     std::unique_ptr<gpd::core::UdpFlowAggregator> udpFlows_;
+    std::unique_ptr<gpd::core::GeoIpResolver> geoIp_;
+    std::unique_ptr<gpd::platform::PingProbeWin> pingProbe_;
+    std::unique_ptr<gpd::platform::TcpPingProbeWin> tcpPingProbe_;
+    std::unique_ptr<gpd::core::PingScheduler> pingScheduler_;
     QVector<gpd::core::NetworkInterfaceInfo> cachedInterfaces_;
     QHash<std::uint32_t, gpd::core::NetworkInterfaceInfo> cachedInterfacesByIndex_;
+    int sortColumn_{0};
+    Qt::SortOrder sortOrder_{Qt::AscendingOrder};
 };
 
 } // namespace gpd::ui

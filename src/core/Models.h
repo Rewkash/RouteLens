@@ -30,6 +30,28 @@ enum class InterfaceKind {
     VirtualOther,
 };
 
+struct GeoInfo {
+    QString countryIsoCode;
+    QString countryName;
+    QString asnNumber;
+    QString asnOrganization;
+    bool isPrivate{false};
+    bool resolved{false};
+};
+
+struct PingAggregate {
+    int rttMinMs{-1};
+    int rttAvgMs{-1};
+    int rttMaxMs{-1};
+    double jitterMs{0.0};
+    double lossPercent{0.0};
+    int samplesInWindow{0};
+    int totalSamples{0};
+    bool icmpBlocked{false};
+    bool unreachable{false};
+    std::int64_t lastSampleAtMs{0};
+};
+
 struct ConnectionInfo {
     std::uint32_t pid{0};
     QString localAddress;
@@ -50,6 +72,8 @@ struct ConnectionInfo {
     bool isPrivateDestination{false};
     bool hasRemoteEndpoint{false};
     bool hasPublicRemoteEndpoint{false};
+    GeoInfo geoInfo;
+    PingAggregate pingAggregate;
 };
 
 struct NetworkInterfaceInfo {

@@ -1,5 +1,7 @@
 #include "core/InterfaceClassifier.h"
 #include "core/ConnectionEnricher.h"
+#include "core/GeoIpResolver.h"
+#include "core/PingAggregator.h"
 #include "core/RouteClassifier.h"
 #include "core/UdpFlowAggregator.h"
 #include "platform/windows/ConnectionScannerWin.h"
@@ -119,7 +121,8 @@ int runEtwProbe(QCoreApplication& app, const int seconds) {
     QTimer trafficTimer;
     QObject::connect(&trafficTimer, &QTimer::timeout, &app, [&]() {
         const QByteArray payload("routelens-etw-probe");
-        udp.writeDatagram(payload, QHostAddress(QStringLiteral("1.1.1.1")), 53);
+        const auto sent = udp.writeDatagram(payload, QHostAddress(QStringLiteral("1.1.1.1")), 53);
+        Q_UNUSED(sent)
     });
     trafficTimer.start(200);
     QTimer::singleShot(seconds * 1000, &app, [&]() {
@@ -185,6 +188,42 @@ int main(int argc, char** argv) {
         connections.push_back(makeConnection(InterfaceKind::Ethernet, QStringLiteral("Ethernet"), QStringLiteral("10.0.0.55")));
         const auto verdict = RouteClassifier::classify(connections);
         expectTrue(verdict.verdict == RouteVerdict::Unknown);
+    }
+
+    {
+        gpd::core::PingAggregator ping;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now});
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now + 1000});
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now + 2000});
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now + 3000});
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now + 4000});
+        const auto agg = ping.aggregateFor(QStringLiteral("1.1.1.1"));
+        expectTrue(agg.rttAvgMs == 20);
+        expectTrue(agg.rttMinMs == 20);
+        expectTrue(agg.rttMaxMs == 20);
+        expectTrue(agg.lossPercent == 0.0);
+    }
+
+    {
+        gpd::core::PingAggregator ping;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        ping.recordSample(QStringLiteral("8.8.8.8"), {false, 20, now});
+        ping.recordSample(QStringLiteral("8.8.8.8"), {false, 50, now + 1000});
+        ping.recordSample(QStringLiteral("8.8.8.8"), {false, 20, now + 2000});
+        ping.recordSample(QStringLiteral("8.8.8.8"), {true, -1, now + 3000});
+        ping.recordSample(QStringLiteral("8.8.8.8"), {true, -1, now + 4000});
+        const auto agg = ping.aggregateFor(QStringLiteral("8.8.8.8"));
+        expectTrue(agg.lossPercent >= 39.9 && agg.lossPercent <= 40.1);
+        expectTrue(agg.jitterMs > 0.0);
+    }
+
+    {
+        gpd::core::GeoIpResolver geo;
+        geo.setOnlineFallbackEnabled(false);
+        expectTrue(!geo.isReady());
+        const auto info = geo.lookup(QStringLiteral("8.8.8.8"));
+        expectTrue(!info.resolved);
     }
 
     {

@@ -17,7 +17,8 @@
 namespace {
 
 constexpr USHORT kUdpTask = 2;
-constexpr USHORT kKernelNetworkUdpTask = 11;
+constexpr USHORT kKernelNetworkUdpTask = 2;
+constexpr USHORT kKernelNetworkUdpTaskLegacy = 11;
 constexpr GUID kUdpIpGuid = {0xbf3a50c5, 0xa9c9, 0x4988, {0xa0, 0x05, 0x2d, 0xf0, 0xb7, 0xc8, 0x0f, 0x80}};
 constexpr GUID kKernelNetworkGuid = {0x7DD42A49, 0x5329, 0x4832, {0x8D, 0xFD, 0x43, 0xD9, 0x79, 0x15, 0x3A, 0x88}};
 
@@ -86,7 +87,8 @@ std::optional<gpd::core::UdpFlowEvent> EtwParser::parse(const void* recordPtr) c
     const auto eventId = record->EventHeader.EventDescriptor.Id;
     const auto task = record->EventHeader.EventDescriptor.Task;
     const bool isClassicUdp = isSameGuid(record->EventHeader.ProviderId, kUdpIpGuid) || task == kUdpTask;
-    const bool isKernelNetworkUdp = isSameGuid(record->EventHeader.ProviderId, kKernelNetworkGuid) && task == kKernelNetworkUdpTask;
+    const bool isKernelNetworkUdp = isSameGuid(record->EventHeader.ProviderId, kKernelNetworkGuid) &&
+                                    (task == kKernelNetworkUdpTask || task == kKernelNetworkUdpTaskLegacy);
     if (!isClassicUdp && !isKernelNetworkUdp) {
         return std::nullopt;
     }

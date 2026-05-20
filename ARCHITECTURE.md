@@ -22,6 +22,10 @@
 
 `ConnectionEnricher` combines connection rows with interface metadata and per-row verdict text.
 
+`GeoIpResolver` performs Country/ASN lookups from local GeoLite2 mmdb files with in-memory TTL cache.
+
+`PingProbeWin` and `TcpPingProbeWin` execute asynchronous reachability probes; `PingScheduler` coordinates targets and `PingAggregator` computes RTT/Jitter/Loss windows.
+
 `RouteClassifier` produces the top-level `Direct/VPN/Split/Unknown` verdict with confidence and reason.
 
 ## Future Data Flow

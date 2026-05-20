@@ -16,6 +16,8 @@ Current status: Milestone 1 scaffold.
 - IPv4 and IPv6 TCP/UDP table scanning.
 - Administrator manifest for diagnostics requiring elevation.
 - Basic logging to `%APPDATA%/RouteLens/logs/app.log`.
+- Country/ASN enrichment via MaxMind GeoLite2 databases (when present locally).
+- Live RTT/Jitter/Loss estimation via ICMP with TCP connect fallback.
 - CI workflow for Windows build and smoke test target.
 
 ## Planned Milestones
@@ -62,6 +64,12 @@ build\windows-msvc-release\RouteLens.exe
 ```
 
 Windows will request elevation because the executable embeds `requireAdministrator`.
+
+## GeoIP Setup
+
+- Place `GeoLite2-Country.mmdb` and `GeoLite2-ASN.mmdb` into `%APPDATA%/RouteLens/geoip/`.
+- Open `Settings -> Configure GeoIP databases...` and click `Reload databases`.
+- Attribution notice: This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com.
 
 ## Security Model
 

@@ -10,6 +10,7 @@ option(GPD_BUILD_TESTS "Build smoke tests" ON)
 option(GPD_DEPLOY_QT "Run windeployqt after building the GUI executable" ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Network Charts Concurrent)
+find_package(maxminddb CONFIG QUIET)
 
 qt_standard_project_setup()
 
@@ -18,6 +19,9 @@ set(GPD_SOURCES
     src/app/Logger.cpp
     src/core/ConnectionEnricher.cpp
     src/core/InterfaceClassifier.cpp
+    src/core/GeoIpResolver.cpp
+    src/core/PingAggregator.cpp
+    src/core/PingScheduler.cpp
     src/core/RouteClassifier.cpp
     src/core/UdpFlowAggregator.cpp
     src/platform/windows/ConnectionScannerWin.cpp
@@ -25,7 +29,9 @@ set(GPD_SOURCES
     src/platform/windows/EtwParser.cpp
     src/platform/windows/InterfaceInspectorWin.cpp
     src/platform/windows/ProcessMonitorWin.cpp
+    src/platform/windows/PingProbeWin.cpp
     src/platform/windows/RouteResolverWin.cpp
+    src/platform/windows/TcpPingProbeWin.cpp
     src/platform/windows/WinapiUtils.cpp
     src/ui/InterfacesPanel.cpp
     src/ui/KindIcon.cpp
@@ -37,16 +43,21 @@ set(GPD_HEADERS
     src/app/Application.h
     src/app/Logger.h
     src/core/ConnectionEnricher.h
+    src/core/GeoIpResolver.h
     src/core/InterfaceClassifier.h
     src/core/Models.h
     src/core/RouteClassifier.h
+    src/core/PingAggregator.h
+    src/core/PingScheduler.h
     src/core/UdpFlowAggregator.h
     src/platform/windows/ConnectionScannerWin.h
     src/platform/windows/EtwNetworkTap.h
     src/platform/windows/EtwParser.h
     src/platform/windows/InterfaceInspectorWin.h
     src/platform/windows/ProcessMonitorWin.h
+    src/platform/windows/PingProbeWin.h
     src/platform/windows/RouteResolverWin.h
+    src/platform/windows/TcpPingProbeWin.h
     src/platform/windows/WinapiUtils.h
     src/ui/InterfacesPanel.h
     src/ui/KindIcon.h
@@ -87,6 +98,13 @@ target_link_libraries(RouteLensApp PUBLIC
     tdh
     ws2_32
 )
+
+if(TARGET maxminddb::maxminddb)
+    target_link_libraries(RouteLensApp PUBLIC maxminddb::maxminddb)
+    target_compile_definitions(RouteLensApp PUBLIC GPD_HAS_MAXMINDDB=1)
+else()
+    message(WARNING "maxminddb not found; GeoIP resolver will be disabled for this build")
+endif()
 
 qt_add_executable(RouteLens WIN32
     src/app/main.cpp

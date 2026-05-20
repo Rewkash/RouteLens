@@ -6,11 +6,13 @@ Qt is used under LGPL terms with dynamic linking. Required modules for the targe
 
 ## libmaxminddb
 
-Planned dependency for GeoLite2 Country and ASN database reading. Not used by Milestone 1 runtime code yet.
+Used for GeoLite2 Country and ASN database reading. License: MIT.
 
 ## MaxMind GeoLite2
 
 GeoLite2 databases require a MaxMind account and are distributed under MaxMind's GeoLite2 EULA. Database files are not committed to this repository.
+
+Attribution: This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com.
 
 ## SQLite
 
