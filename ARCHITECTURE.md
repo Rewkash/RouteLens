@@ -14,7 +14,15 @@
 
 `main.cpp` creates `gpd::app::Application`, installs the Qt message logger, applies the default theme, checks smoke-test mode, and shows `MainWindow`.
 
-`MainWindow` currently renders a disabled process selector, disabled monitoring controls, the verdict badge, and the empty connection table expected by the target UI.
+`MainWindow` resolves connections asynchronously: process socket scan, interface cache lookup, route resolution (`GetBestInterfaceEx`), per-row enrichment, and final route verdict classification.
+
+`InterfaceInspectorWin` provides the complete adapter inventory using `GetAdaptersAddresses`.
+
+`RouteResolverWin` maps each remote endpoint to the actual egress interface index.
+
+`ConnectionEnricher` combines connection rows with interface metadata and per-row verdict text.
+
+`RouteClassifier` produces the top-level `Direct/VPN/Split/Unknown` verdict with confidence and reason.
 
 ## Future Data Flow
 

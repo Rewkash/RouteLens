@@ -16,9 +16,19 @@ qt_standard_project_setup()
 set(GPD_SOURCES
     src/app/Application.cpp
     src/app/Logger.cpp
+    src/core/ConnectionEnricher.cpp
+    src/core/InterfaceClassifier.cpp
+    src/core/RouteClassifier.cpp
+    src/core/UdpFlowAggregator.cpp
     src/platform/windows/ConnectionScannerWin.cpp
+    src/platform/windows/EtwNetworkTap.cpp
+    src/platform/windows/EtwParser.cpp
+    src/platform/windows/InterfaceInspectorWin.cpp
     src/platform/windows/ProcessMonitorWin.cpp
+    src/platform/windows/RouteResolverWin.cpp
     src/platform/windows/WinapiUtils.cpp
+    src/ui/InterfacesPanel.cpp
+    src/ui/KindIcon.cpp
     src/ui/MainWindow.cpp
     src/ui/VerdictBadge.cpp
 )
@@ -26,10 +36,20 @@ set(GPD_SOURCES
 set(GPD_HEADERS
     src/app/Application.h
     src/app/Logger.h
+    src/core/ConnectionEnricher.h
+    src/core/InterfaceClassifier.h
     src/core/Models.h
+    src/core/RouteClassifier.h
+    src/core/UdpFlowAggregator.h
     src/platform/windows/ConnectionScannerWin.h
+    src/platform/windows/EtwNetworkTap.h
+    src/platform/windows/EtwParser.h
+    src/platform/windows/InterfaceInspectorWin.h
     src/platform/windows/ProcessMonitorWin.h
+    src/platform/windows/RouteResolverWin.h
     src/platform/windows/WinapiUtils.h
+    src/ui/InterfacesPanel.h
+    src/ui/KindIcon.h
     src/ui/MainWindow.h
     src/ui/VerdictBadge.h
 )
@@ -45,6 +65,8 @@ target_compile_definitions(RouteLensApp PUBLIC
     WIN32_LEAN_AND_MEAN
     NOMINMAX
     QT_NO_KEYWORDS
+    _WIN32_WINNT=0x0A00
+    WINVER=0x0A00
 )
 
 if(MSVC)
@@ -62,6 +84,7 @@ target_link_libraries(RouteLensApp PUBLIC
     advapi32
     iphlpapi
     shell32
+    tdh
     ws2_32
 )
 

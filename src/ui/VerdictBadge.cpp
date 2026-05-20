@@ -26,6 +26,28 @@ QString protocolToString(const TransportProtocol protocol) {
     return QStringLiteral("-");
 }
 
+QString interfaceKindToString(const InterfaceKind kind) {
+    switch (kind) {
+    case InterfaceKind::Loopback:
+        return QStringLiteral("Loopback");
+    case InterfaceKind::Ethernet:
+        return QStringLiteral("Ethernet");
+    case InterfaceKind::WiFi:
+        return QStringLiteral("WiFi");
+    case InterfaceKind::Cellular:
+        return QStringLiteral("Cellular");
+    case InterfaceKind::VpnTunnel:
+        return QStringLiteral("VPN Tunnel");
+    case InterfaceKind::VirtualOverlay:
+        return QStringLiteral("Virtual Overlay");
+    case InterfaceKind::VirtualOther:
+        return QStringLiteral("Virtual Other");
+    case InterfaceKind::Unknown:
+        return QStringLiteral("Unknown");
+    }
+    return QStringLiteral("Unknown");
+}
+
 } // namespace gpd::core
 
 namespace gpd::ui {
