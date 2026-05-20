@@ -19,7 +19,10 @@ set(GPD_SOURCES
     src/core/ConnectionEnricher.cpp
     src/core/InterfaceClassifier.cpp
     src/core/RouteClassifier.cpp
+    src/core/UdpFlowAggregator.cpp
     src/platform/windows/ConnectionScannerWin.cpp
+    src/platform/windows/EtwNetworkTap.cpp
+    src/platform/windows/EtwParser.cpp
     src/platform/windows/InterfaceInspectorWin.cpp
     src/platform/windows/ProcessMonitorWin.cpp
     src/platform/windows/RouteResolverWin.cpp
@@ -37,7 +40,10 @@ set(GPD_HEADERS
     src/core/InterfaceClassifier.h
     src/core/Models.h
     src/core/RouteClassifier.h
+    src/core/UdpFlowAggregator.h
     src/platform/windows/ConnectionScannerWin.h
+    src/platform/windows/EtwNetworkTap.h
+    src/platform/windows/EtwParser.h
     src/platform/windows/InterfaceInspectorWin.h
     src/platform/windows/ProcessMonitorWin.h
     src/platform/windows/RouteResolverWin.h
@@ -78,6 +84,7 @@ target_link_libraries(RouteLensApp PUBLIC
     advapi32
     iphlpapi
     shell32
+    tdh
     ws2_32
 )
 

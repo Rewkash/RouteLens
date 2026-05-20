@@ -55,6 +55,9 @@ VerdictSummary RouteClassifier::classify(const QVector<ConnectionInfo>& connecti
     QMap<InterfaceKind, int> byKind;
 
     for (const auto& connection : connections) {
+        if (connection.protocol == TransportProtocol::Udp && connection.isInferred) {
+            continue;
+        }
         if (!connection.hasRemoteEndpoint) {
             continue;
         }
@@ -80,7 +83,15 @@ VerdictSummary RouteClassifier::classify(const QVector<ConnectionInfo>& connecti
     if (totalPublic == 0) {
         summary.verdict = RouteVerdict::Unknown;
         summary.confidencePercent = 0;
-        summary.reason = QStringLiteral("Only LAN/private destinations");
+        bool hasInferredUdp = false;
+        for (const auto& connection : connections) {
+            if (connection.protocol == TransportProtocol::Udp && connection.isInferred) {
+                hasInferredUdp = true;
+                break;
+            }
+        }
+        summary.reason = hasInferredUdp ? QStringLiteral("Only inferred UDP routes; enable ETW for real attribution")
+                                        : QStringLiteral("Only LAN/private destinations");
         return summary;
     }
 

@@ -13,12 +13,18 @@ class QComboBox;
 class QPushButton;
 class QTableWidget;
 class QTimer;
+class QLabel;
 
 namespace gpd::platform {
 class ProcessMonitorWin;
 class ConnectionScannerWin;
 class InterfaceInspectorWin;
 class RouteResolverWin;
+class EtwNetworkTap;
+}
+
+namespace gpd::core {
+class UdpFlowAggregator;
 }
 
 namespace gpd::ui {
@@ -31,6 +37,9 @@ struct RefreshResult {
     QVector<gpd::core::NetworkInterfaceInfo> interfaces;
     gpd::core::VerdictSummary verdict;
     QHash<std::uint32_t, gpd::core::NetworkInterfaceInfo> interfacesByIndex;
+    std::uint32_t selectedPid{0};
+    int rawConnectionCount{0};
+    bool etwRunning{false};
 };
 
 class MainWindow final : public QMainWindow {
@@ -55,7 +64,9 @@ private:
     VerdictBadge* verdictBadge_{nullptr};
     QTableWidget* connectionTable_{nullptr};
     InterfacesPanel* interfacesPanel_{nullptr};
+    QLabel* etwStatusLabel_{nullptr};
     QTimer* refreshTimer_{nullptr};
+    QTimer* pruneTimer_{nullptr};
     bool monitoring_{false};
     bool refreshInFlight_{false};
     qint64 lastInterfaceRefreshMs_{0};
@@ -64,6 +75,8 @@ private:
     std::unique_ptr<gpd::platform::ConnectionScannerWin> connectionScanner_;
     std::unique_ptr<gpd::platform::InterfaceInspectorWin> interfaceInspector_;
     std::unique_ptr<gpd::platform::RouteResolverWin> routeResolver_;
+    std::unique_ptr<gpd::platform::EtwNetworkTap> etwTap_;
+    std::unique_ptr<gpd::core::UdpFlowAggregator> udpFlows_;
     QVector<gpd::core::NetworkInterfaceInfo> cachedInterfaces_;
     QHash<std::uint32_t, gpd::core::NetworkInterfaceInfo> cachedInterfacesByIndex_;
 };

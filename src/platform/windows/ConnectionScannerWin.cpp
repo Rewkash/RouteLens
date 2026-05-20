@@ -15,29 +15,24 @@
 
 namespace {
 
-QString sockaddrToString(const SOCKADDR* addr, const socklen_t addrLen) {
-    wchar_t buffer[INET6_ADDRSTRLEN]{};
-    DWORD bufferSize = static_cast<DWORD>(std::size(buffer));
-    if (WSAAddressToStringW(const_cast<LPSOCKADDR>(addr), addrLen, nullptr, buffer, &bufferSize) == 0) {
-        return QString::fromWCharArray(buffer);
-    }
-    return QStringLiteral("-");
-}
-
 QString ip4ToString(const DWORD ipAddr) {
     IN_ADDR addr{};
     addr.S_un.S_addr = ipAddr;
-    SOCKADDR_IN socketAddr{};
-    socketAddr.sin_family = AF_INET;
-    socketAddr.sin_addr = addr;
-    return sockaddrToString(reinterpret_cast<const SOCKADDR*>(&socketAddr), sizeof(socketAddr));
+    wchar_t buffer[INET_ADDRSTRLEN]{};
+    if (InetNtopW(AF_INET, &addr, buffer, INET_ADDRSTRLEN) == nullptr) {
+        return QStringLiteral("-");
+    }
+    return QString::fromWCharArray(buffer);
 }
 
 QString ip6ToString(const UCHAR ipAddr[16]) {
-    SOCKADDR_IN6 socketAddr{};
-    socketAddr.sin6_family = AF_INET6;
-    memcpy(&socketAddr.sin6_addr, ipAddr, 16);
-    return sockaddrToString(reinterpret_cast<const SOCKADDR*>(&socketAddr), sizeof(socketAddr));
+    IN6_ADDR addr{};
+    memcpy(&addr, ipAddr, 16);
+    wchar_t buffer[INET6_ADDRSTRLEN]{};
+    if (InetNtopW(AF_INET6, &addr, buffer, INET6_ADDRSTRLEN) == nullptr) {
+        return QStringLiteral("-");
+    }
+    return QString::fromWCharArray(buffer);
 }
 
 std::uint16_t networkPortToHost(const DWORD netPort) {
