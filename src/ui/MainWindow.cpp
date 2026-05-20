@@ -1,11 +1,19 @@
 #include "ui/MainWindow.h"
 
+#include "core/ConnectionEnricher.h"
+#include "core/InterfaceClassifier.h"
 #include "core/Models.h"
+#include "core/RouteClassifier.h"
 #include "platform/windows/ConnectionScannerWin.h"
+#include "platform/windows/InterfaceInspectorWin.h"
 #include "platform/windows/ProcessMonitorWin.h"
+#include "platform/windows/RouteResolverWin.h"
+#include "ui/InterfacesPanel.h"
+#include "ui/KindIcon.h"
 #include "ui/VerdictBadge.h"
 
 #include <QComboBox>
+#include <QDateTime>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -17,6 +25,9 @@
 #include <QVariant>
 #include <QWidget>
 
+#include <QtConcurrent>
+
+#include <cstdint>
 #include <memory>
 #include <utility>
 
@@ -34,7 +45,9 @@ namespace gpd::ui {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , processMonitor_(std::make_unique<gpd::platform::ProcessMonitorWin>())
-    , connectionScanner_(std::make_unique<gpd::platform::ConnectionScannerWin>()) {
+    , connectionScanner_(std::make_unique<gpd::platform::ConnectionScannerWin>())
+    , interfaceInspector_(std::make_unique<gpd::platform::InterfaceInspectorWin>())
+    , routeResolver_(std::make_unique<gpd::platform::RouteResolverWin>()) {
     buildUi();
 }
 
@@ -87,6 +100,9 @@ void MainWindow::buildUi() {
     connectionTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     root->addWidget(connectionTable_, 1);
 
+    interfacesPanel_ = makeQtOwned<InterfacesPanel>(central);
+    root->addWidget(interfacesPanel_);
+
     auto* footer = makeQtOwned<QLabel>(tr("Select a process and start monitoring to view live TCP/UDP connections."), central);
     footer->setWordWrap(true);
     root->addWidget(footer);
@@ -99,6 +115,10 @@ void MainWindow::buildUi() {
     connect(refreshButton_, &QPushButton::clicked, this, &MainWindow::refreshProcesses);
     connect(startStopButton_, &QPushButton::clicked, this, &MainWindow::updateMonitoringState);
     connect(refreshTimer_, &QTimer::timeout, this, &MainWindow::refreshConnections);
+    connect(&refreshWatcher_, &QFutureWatcher<RefreshResult>::finished, this, [this]() {
+        refreshInFlight_ = false;
+        applyRefreshResult(refreshWatcher_.result());
+    });
     connect(processCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
         if (!monitoring_) {
             refreshConnections();
@@ -112,6 +132,7 @@ void MainWindow::buildUi() {
 MainWindow::~MainWindow() = default;
 
 void MainWindow::refreshProcesses() {
+    updateCachedInterfaces(true);
     const auto processes = processMonitor_->listProcesses();
     const auto activeCounts = connectionScanner_->activePidConnectionCounts();
     const auto currentPid = processCombo_->currentData().toUInt();
@@ -151,17 +172,58 @@ void MainWindow::refreshProcesses() {
 }
 
 void MainWindow::refreshConnections() {
-    const auto selectedPid = processCombo_->currentData().toUInt();
-    connectionTable_->setRowCount(0);
-    if (selectedPid == 0) {
+    if (refreshInFlight_) {
         return;
     }
 
-    const auto connections = connectionScanner_->listConnectionsForPid(selectedPid);
-    connectionTable_->setRowCount(connections.size());
-    for (int row = 0; row < connections.size(); ++row) {
-        fillConnectionRow(row, connections[row]);
+    const auto selectedPid = processCombo_->currentData().toUInt();
+    if (selectedPid == 0) {
+        connectionTable_->setRowCount(0);
+        return;
     }
+
+    updateCachedInterfaces(false);
+
+    refreshInFlight_ = true;
+    const auto interfacesByIndex = cachedInterfacesByIndex_;
+    const auto interfaces = cachedInterfaces_;
+    const auto* scanner = connectionScanner_.get();
+    const auto* resolver = routeResolver_.get();
+
+    refreshWatcher_.setFuture(QtConcurrent::run([selectedPid, interfacesByIndex, interfaces, scanner, resolver]() {
+        RefreshResult result;
+        result.interfaces = interfaces;
+        result.interfacesByIndex = interfacesByIndex;
+        const auto connections = scanner->listConnectionsForPid(selectedPid);
+        result.connections = gpd::core::ConnectionEnricher::enrich(connections, interfacesByIndex, *resolver);
+        result.verdict = gpd::core::RouteClassifier::classify(result.connections);
+        return result;
+    }));
+}
+
+void MainWindow::applyRefreshResult(const RefreshResult& result) {
+    connectionTable_->setRowCount(result.connections.size());
+    for (int row = 0; row < result.connections.size(); ++row) {
+        fillConnectionRow(row, result.connections[row]);
+    }
+
+    verdictBadge_->setVerdict(result.verdict);
+    interfacesPanel_->setInterfaces(result.interfaces);
+}
+
+void MainWindow::updateCachedInterfaces(const bool forceUpdate) {
+    const auto nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (!forceUpdate && !cachedInterfaces_.isEmpty() && (nowMs - lastInterfaceRefreshMs_) < 5000) {
+        return;
+    }
+
+    cachedInterfaces_ = interfaceInspector_->listInterfaces();
+    cachedInterfacesByIndex_.clear();
+    for (const auto& interfaceInfo : cachedInterfaces_) {
+        cachedInterfacesByIndex_.insert(interfaceInfo.ifIndex, interfaceInfo);
+    }
+    lastInterfaceRefreshMs_ = nowMs;
+    interfacesPanel_->setInterfaces(cachedInterfaces_);
 }
 
 void MainWindow::updateMonitoringState() {
@@ -193,8 +255,13 @@ void MainWindow::fillConnectionRow(const int row, const gpd::core::ConnectionInf
     setItem(5, QStringLiteral("-"));
     setItem(6, QStringLiteral("-"));
     setItem(7, QStringLiteral("-"));
-    setItem(8, QStringLiteral("%1:%2").arg(connection.localAddress).arg(connection.localPort));
-    setItem(9, QStringLiteral("Pending"));
+    auto* interfaceItem = makeQtOwned<QTableWidgetItem>(connection.routedThroughInterfaceName.isEmpty() ? QStringLiteral("-") : connection.routedThroughInterfaceName);
+    interfaceItem->setIcon(KindIcon::make(connection.routedThroughKind));
+    if (!connection.routedThroughDescription.isEmpty()) {
+        interfaceItem->setToolTip(connection.routedThroughDescription);
+    }
+    connectionTable_->setItem(row, 8, interfaceItem);
+    setItem(9, connection.perRowVerdict);
 }
 
 } // namespace gpd::ui

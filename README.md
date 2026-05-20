@@ -7,11 +7,16 @@ Current status: Milestone 1 scaffold.
 ## Features In This Milestone
 
 - Qt 6 Widgets application shell with dark Fusion theme.
-- Windows-only CMake project targeting C++20.
-- Administrator manifest for future ICMP and connection-table diagnostics.
+- Process picker filtered to processes with active sockets.
+- Per-connection route attribution to concrete network interface name.
+- Interface classification (Ethernet, WiFi, VPN tunnel, ZeroTier overlay, loopback, virtual).
+- Direct/VPN/Split verdict badge with confidence and textual reason.
+- Expandable `Network interfaces` panel with adapter details.
+- Async refresh pipeline using `QtConcurrent` to avoid UI blocking.
+- IPv4 and IPv6 TCP/UDP table scanning.
+- Administrator manifest for diagnostics requiring elevation.
 - Basic logging to `%APPDATA%/RouteLens/logs/app.log`.
 - CI workflow for Windows build and smoke test target.
-- Initial architecture directories for `app`, `core`, `platform/windows`, and `ui`.
 
 ## Planned Milestones
 
