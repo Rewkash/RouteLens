@@ -3,6 +3,8 @@
 #include "core/GeoIpResolver.h"
 #include "core/PingAggregator.h"
 #include "core/RouteClassifier.h"
+#include "core/TunnelCorrelator.h"
+#include "core/TunnelProcessRegistry.h"
 #include "core/UdpFlowAggregator.h"
 #include "platform/windows/ConnectionScannerWin.h"
 #include "platform/windows/EtwNetworkTap.h"
@@ -168,7 +170,10 @@ int main(int argc, char** argv) {
         connections.push_back(makeConnection(InterfaceKind::VpnTunnel, QStringLiteral("nekobox-tun"), QStringLiteral("8.8.8.8")));
         connections.push_back(makeConnection(InterfaceKind::VpnTunnel, QStringLiteral("nekobox-tun"), QStringLiteral("1.1.1.1")));
         connections.push_back(makeConnection(InterfaceKind::VpnTunnel, QStringLiteral("nekobox-tun"), QStringLiteral("9.9.9.9")));
-        const auto verdict = RouteClassifier::classify(connections);
+        gpd::core::TunnelCorrelator correlator(2000);
+        correlator.registerTunnelProcess(111, QStringLiteral("nekobox"));
+        correlator.recordFlow(111, 5, InterfaceKind::Ethernet, 1200, true, 1000, QStringLiteral("9.9.9.9"));
+        const auto verdict = RouteClassifier::classify(connections, correlator, 2000);
         expectTrue(verdict.verdict == RouteVerdict::Vpn);
         expectTrue(verdict.confidencePercent >= 70);
     }
@@ -178,7 +183,10 @@ int main(int argc, char** argv) {
         connections.push_back(makeConnection(InterfaceKind::Ethernet, QStringLiteral("Ethernet"), QStringLiteral("8.8.8.8")));
         connections.push_back(makeConnection(InterfaceKind::VpnTunnel, QStringLiteral("nekobox-tun"), QStringLiteral("1.1.1.1")));
         connections.push_back(makeConnection(InterfaceKind::Ethernet, QStringLiteral("Ethernet"), QStringLiteral("9.9.9.9")));
-        const auto verdict = RouteClassifier::classify(connections);
+        gpd::core::TunnelCorrelator correlator(2000);
+        correlator.registerTunnelProcess(111, QStringLiteral("nekobox"));
+        correlator.recordFlow(111, 5, InterfaceKind::Ethernet, 1200, true, 1000, QStringLiteral("9.9.9.9"));
+        const auto verdict = RouteClassifier::classify(connections, correlator, 2000);
         expectTrue(verdict.verdict == RouteVerdict::SplitTunnel);
     }
 
@@ -186,8 +194,24 @@ int main(int argc, char** argv) {
         QVector<gpd::core::ConnectionInfo> connections;
         connections.push_back(makeConnection(InterfaceKind::Ethernet, QStringLiteral("Ethernet"), QStringLiteral("192.168.1.25")));
         connections.push_back(makeConnection(InterfaceKind::Ethernet, QStringLiteral("Ethernet"), QStringLiteral("10.0.0.55")));
-        const auto verdict = RouteClassifier::classify(connections);
+        gpd::core::TunnelCorrelator correlator(2000);
+        const auto verdict = RouteClassifier::classify(connections, correlator, 2000);
         expectTrue(verdict.verdict == RouteVerdict::Unknown);
+    }
+
+    {
+        expectTrue(gpd::core::TunnelProcessRegistry::isKnownTunnel(QStringLiteral("Nekobox.exe")));
+        expectTrue(gpd::core::TunnelProcessRegistry::isKnownTunnel(QStringLiteral("sing-box")));
+        expectTrue(!gpd::core::TunnelProcessRegistry::isKnownTunnel(QStringLiteral("steam.exe")));
+    }
+
+    {
+        gpd::core::TunnelCorrelator correlator(2000);
+        correlator.registerTunnelProcess(123, QStringLiteral("nekobox"));
+        correlator.recordFlow(123, 5, InterfaceKind::Ethernet, 1000, true, 1000, QStringLiteral("8.8.8.8"));
+        expectTrue(correlator.hasActiveTunnel(2000) == QStringLiteral("nekobox"));
+        correlator.prune(3500);
+        expectTrue(correlator.hasActiveTunnel(4000).isEmpty());
     }
 
     {

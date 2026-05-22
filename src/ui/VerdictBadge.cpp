@@ -5,15 +5,17 @@ namespace gpd::core {
 QString routeVerdictToString(const RouteVerdict verdict) {
     switch (verdict) {
     case RouteVerdict::Direct:
-        return QStringLiteral("DIRECT");
+        return QStringLiteral("Direct");
     case RouteVerdict::Vpn:
-        return QStringLiteral("VPN");
+        return QStringLiteral("Proxied (confirmed)");
     case RouteVerdict::SplitTunnel:
-        return QStringLiteral("SPLIT");
+        return QStringLiteral("Split-tunnel");
+    case RouteVerdict::TunneledSuspected:
+        return QStringLiteral("Tunneled (suspected)");
     case RouteVerdict::Unknown:
-        return QStringLiteral("UNKNOWN");
+        return QStringLiteral("Unknown");
     }
-    return QStringLiteral("UNKNOWN");
+    return QStringLiteral("Unknown");
 }
 
 QString protocolToString(const TransportProtocol protocol) {
@@ -65,9 +67,11 @@ void VerdictBadge::setVerdict(const gpd::core::VerdictSummary& summary) {
         case gpd::core::RouteVerdict::Direct:
             return QStringLiteral("#2f9e44");
         case gpd::core::RouteVerdict::Vpn:
-            return QStringLiteral("#f08c00");
+            return QStringLiteral("#1c7ed6");
         case gpd::core::RouteVerdict::SplitTunnel:
-            return QStringLiteral("#c92a2a");
+            return QStringLiteral("#f08c00");
+        case gpd::core::RouteVerdict::TunneledSuspected:
+            return QStringLiteral("#e67700");
         case gpd::core::RouteVerdict::Unknown:
             return QStringLiteral("#495057");
         }

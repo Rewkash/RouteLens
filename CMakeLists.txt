@@ -18,11 +18,15 @@ set(GPD_SOURCES
     src/app/Application.cpp
     src/app/Logger.cpp
     src/core/ConnectionEnricher.cpp
+    src/core/ClashApiClient.cpp
+    src/core/ClashConnectionMatcher.cpp
     src/core/InterfaceClassifier.cpp
     src/core/GeoIpResolver.cpp
     src/core/PingAggregator.cpp
     src/core/PingScheduler.cpp
     src/core/RouteClassifier.cpp
+    src/core/TunnelCorrelator.cpp
+    src/core/TunnelProcessRegistry.cpp
     src/core/UdpFlowAggregator.cpp
     src/platform/windows/ConnectionScannerWin.cpp
     src/platform/windows/EtwNetworkTap.cpp
@@ -43,10 +47,14 @@ set(GPD_HEADERS
     src/app/Application.h
     src/app/Logger.h
     src/core/ConnectionEnricher.h
+    src/core/ClashApiClient.h
+    src/core/ClashConnectionMatcher.h
     src/core/GeoIpResolver.h
     src/core/InterfaceClassifier.h
     src/core/Models.h
     src/core/RouteClassifier.h
+    src/core/TunnelCorrelator.h
+    src/core/TunnelProcessRegistry.h
     src/core/PingAggregator.h
     src/core/PingScheduler.h
     src/core/UdpFlowAggregator.h

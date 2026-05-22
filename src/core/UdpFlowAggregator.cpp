@@ -14,6 +14,9 @@ void UdpFlowAggregator::ingestBatch(const QVector<UdpFlowEvent>& events) {
     }
 
     for (const auto& event : events) {
+        if (event.protocol != TransportProtocol::Udp) {
+            continue;
+        }
         UdpEndpointKey key;
         key.pid = event.pid;
         key.localAddress = event.localAddress;

@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <memory>
 
+class QDateTime;
+
 class QComboBox;
 class QPushButton;
 class QTableWidget;
@@ -26,9 +28,12 @@ class EtwNetworkTap;
 }
 
 namespace gpd::core {
+class ClashApiClient;
+class ClashConnectionMatcher;
 class UdpFlowAggregator;
 class GeoIpResolver;
 class PingScheduler;
+class TunnelCorrelator;
 struct TargetEndpoint;
 }
 
@@ -69,8 +74,10 @@ private:
     void applyRefreshResult(const RefreshResult& result);
     void updateCachedInterfaces(bool forceUpdate);
     void configureGeoIp();
+    void showInterfaceDetails(const gpd::core::NetworkInterfaceInfo& info);
     void restoreTableSortState();
     void persistTableSortState() const;
+    void routeToTunnelCorrelator(const QVector<gpd::core::UdpFlowEvent>& events);
 
     QComboBox* processCombo_{nullptr};
     QPushButton* refreshButton_{nullptr};
@@ -80,6 +87,7 @@ private:
     InterfacesPanel* interfacesPanel_{nullptr};
     QLabel* etwStatusLabel_{nullptr};
     QLabel* geoStatusLabel_{nullptr};
+    QLabel* clashStatusLabel_{nullptr};
     QAction* configureGeoIpAction_{nullptr};
     QTimer* refreshTimer_{nullptr};
     QTimer* pruneTimer_{nullptr};
@@ -92,15 +100,31 @@ private:
     std::unique_ptr<gpd::platform::InterfaceInspectorWin> interfaceInspector_;
     std::unique_ptr<gpd::platform::RouteResolverWin> routeResolver_;
     std::unique_ptr<gpd::platform::EtwNetworkTap> etwTap_;
+    std::unique_ptr<gpd::core::ClashApiClient> clashApi_;
+    std::unique_ptr<gpd::core::ClashConnectionMatcher> clashMatcher_;
     std::unique_ptr<gpd::core::UdpFlowAggregator> udpFlows_;
     std::unique_ptr<gpd::core::GeoIpResolver> geoIp_;
     std::unique_ptr<gpd::platform::PingProbeWin> pingProbe_;
     std::unique_ptr<gpd::platform::TcpPingProbeWin> tcpPingProbe_;
     std::unique_ptr<gpd::core::PingScheduler> pingScheduler_;
+    std::unique_ptr<gpd::core::TunnelCorrelator> tunnelCorrelator_;
     QVector<gpd::core::NetworkInterfaceInfo> cachedInterfaces_;
     QHash<std::uint32_t, gpd::core::NetworkInterfaceInfo> cachedInterfacesByIndex_;
+    QHash<QString, std::uint32_t> interfaceIndexByLocalIp_;
+    QHash<std::uint32_t, QString> registeredTunnelPids_;
     int sortColumn_{0};
     Qt::SortOrder sortOrder_{Qt::AscendingOrder};
+
+    struct UdpQualityState {
+        std::uint64_t lastRecvPackets{0};
+        std::int64_t lastSeenMs{0};
+        std::int64_t lastUpdateMs{0};
+        double expectedIntervalMs{0.0};
+        double jitterMs{0.0};
+        double lossPercent{0.0};
+        int syntheticRttMs{-1};
+    };
+    QHash<QString, UdpQualityState> udpQualityByEndpoint_;
 };
 
 } // namespace gpd::ui

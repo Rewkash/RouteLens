@@ -17,8 +17,11 @@
 namespace {
 
 constexpr USHORT kUdpTask = 2;
+constexpr USHORT kTcpTask = 1;
 constexpr USHORT kKernelNetworkUdpTask = 2;
 constexpr USHORT kKernelNetworkUdpTaskLegacy = 11;
+constexpr USHORT kKernelNetworkTcpTask = 1;
+constexpr USHORT kKernelNetworkTcpTaskLegacy = 10;
 constexpr GUID kUdpIpGuid = {0xbf3a50c5, 0xa9c9, 0x4988, {0xa0, 0x05, 0x2d, 0xf0, 0xb7, 0xc8, 0x0f, 0x80}};
 constexpr GUID kKernelNetworkGuid = {0x7DD42A49, 0x5329, 0x4832, {0x8D, 0xFD, 0x43, 0xD9, 0x79, 0x15, 0x3A, 0x88}};
 
@@ -87,9 +90,12 @@ std::optional<gpd::core::UdpFlowEvent> EtwParser::parse(const void* recordPtr) c
     const auto eventId = record->EventHeader.EventDescriptor.Id;
     const auto task = record->EventHeader.EventDescriptor.Task;
     const bool isClassicUdp = isSameGuid(record->EventHeader.ProviderId, kUdpIpGuid) || task == kUdpTask;
+    const bool isClassicTcp = task == kTcpTask;
     const bool isKernelNetworkUdp = isSameGuid(record->EventHeader.ProviderId, kKernelNetworkGuid) &&
                                     (task == kKernelNetworkUdpTask || task == kKernelNetworkUdpTaskLegacy);
-    if (!isClassicUdp && !isKernelNetworkUdp) {
+    const bool isKernelNetworkTcp = isSameGuid(record->EventHeader.ProviderId, kKernelNetworkGuid) &&
+                                    (task == kKernelNetworkTcpTask || task == kKernelNetworkTcpTaskLegacy);
+    if (!isClassicUdp && !isKernelNetworkUdp && !isClassicTcp && !isKernelNetworkTcp) {
         return std::nullopt;
     }
     if (!(opcode == 10 || opcode == 11 || opcode == 17 || opcode == 26 || opcode == 27 || opcode == 42 || opcode == 43 || eventId == 42 || eventId == 43 || eventId == 58 || eventId == 59)) {
@@ -107,6 +113,7 @@ std::optional<gpd::core::UdpFlowEvent> EtwParser::parse(const void* recordPtr) c
     }
 
     gpd::core::UdpFlowEvent event;
+    event.protocol = (isClassicTcp || isKernelNetworkTcp) ? gpd::core::TransportProtocol::Tcp : gpd::core::TransportProtocol::Udp;
     event.pid = static_cast<std::uint32_t>(*pid);
     event.isIPv6 = daddr->size() == 16;
     event.isSend = (opcode == 10 || opcode == 26 || opcode == 17 || opcode == 42 || eventId == 42 || eventId == 58);

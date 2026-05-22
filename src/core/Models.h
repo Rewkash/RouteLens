@@ -63,12 +63,22 @@ struct ConnectionInfo {
     QString routedThroughInterfaceName;
     QString routedThroughDescription;
     InterfaceKind routedThroughKind{InterfaceKind::Unknown};
+    QString proxyStatus;
+    QString proxyStatusReason;
+    bool tunnelProcessCorrelated{false};
+    QString correlatedTunnelProcessName;
+    bool clashTracked{false};
+    QString clashOutbound;
+    QString clashRule;
+    QVector<QString> clashChains;
     QString perRowVerdict;
     bool observedFromEtw{false};
     bool isInferred{false};
     std::int64_t lastSeenMs{0};
     std::uint64_t sentBytes{0};
     std::uint64_t recvBytes{0};
+    std::uint64_t sentPackets{0};
+    std::uint64_t recvPackets{0};
     bool isPrivateDestination{false};
     bool hasRemoteEndpoint{false};
     bool hasPublicRemoteEndpoint{false};
@@ -79,6 +89,7 @@ struct ConnectionInfo {
 struct NetworkInterfaceInfo {
     std::uint32_t ifIndex{0};
     std::uint64_t luid{0};
+    QString adapterName;
     QString friendlyName;
     QString description;
     std::uint32_t ifType{0};
@@ -99,6 +110,7 @@ struct UdpFlowEvent {
     std::uint16_t remotePort{0};
     bool isIPv6{false};
     bool isSend{false};
+    TransportProtocol protocol{TransportProtocol::Udp};
     std::int64_t timestampMs{0};
     std::uint32_t sizeBytes{0};
 };
@@ -127,6 +139,7 @@ struct UdpEndpointObservation {
 
 struct RoutingDecision {
     std::uint32_t ifIndex{0};
+    QString reason;
 };
 
 enum class RouteVerdict {
@@ -134,12 +147,16 @@ enum class RouteVerdict {
     Direct,
     Vpn,
     SplitTunnel,
+    TunneledSuspected,
 };
 
 struct VerdictSummary {
     RouteVerdict verdict{RouteVerdict::Unknown};
     int confidencePercent{0};
     QString reason;
+    QString tunnelProcessName;
+    bool clashApiAvailable{false};
+    int clashTrackedCount{0};
 };
 
 QString routeVerdictToString(RouteVerdict verdict);
