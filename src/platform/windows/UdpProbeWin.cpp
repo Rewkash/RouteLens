@@ -78,6 +78,13 @@ QByteArray buildGenericRandom(QString& proto) {
     return payload;
 }
 
+QByteArray buildNtpQuery(QString& proto) {
+    proto = QStringLiteral("ntp_query");
+    QByteArray packet(48, '\0');
+    packet[0] = static_cast<char>(0x1B);
+    return packet;
+}
+
 QByteArray buildPayload(const Task& task, QString& proto) {
     switch (task.payloadType) {
     case UdpProbePayload::SourceA2sInfo:
@@ -88,6 +95,8 @@ QByteArray buildPayload(const Task& task, QString& proto) {
         return buildClosedPortProbe(proto);
     case UdpProbePayload::GenericRandom:
         return buildGenericRandom(proto);
+    case UdpProbePayload::NtpQuery:
+        return buildNtpQuery(proto);
     case UdpProbePayload::Auto:
     default:
         break;
