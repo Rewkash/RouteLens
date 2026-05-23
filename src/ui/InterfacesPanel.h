@@ -16,7 +16,11 @@ public:
 
     void setInterfaces(const QVector<gpd::core::NetworkInterfaceInfo>& interfaces);
 
+Q_SIGNALS:
+    void interfaceActivated(gpd::core::NetworkInterfaceInfo info);
+
 private:
+    QVector<gpd::core::NetworkInterfaceInfo> interfaces_;
     QTableWidget* table_{nullptr};
 };
 

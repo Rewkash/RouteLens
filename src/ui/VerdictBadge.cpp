@@ -5,17 +5,17 @@ namespace gpd::core {
 QString routeVerdictToString(const RouteVerdict verdict) {
     switch (verdict) {
     case RouteVerdict::Direct:
-        return QStringLiteral("Direct");
+        return QStringLiteral("Напрямую");
     case RouteVerdict::Vpn:
-        return QStringLiteral("Proxied (confirmed)");
+        return QStringLiteral("Через прокси (подтверждено)");
     case RouteVerdict::SplitTunnel:
         return QStringLiteral("Split-tunnel");
     case RouteVerdict::TunneledSuspected:
-        return QStringLiteral("Tunneled (suspected)");
+        return QStringLiteral("Туннелируется (предположительно)");
     case RouteVerdict::Unknown:
-        return QStringLiteral("Unknown");
+        return QStringLiteral("Неизвестно");
     }
-    return QStringLiteral("Unknown");
+    return QStringLiteral("Неизвестно");
 }
 
 QString protocolToString(const TransportProtocol protocol) {
@@ -35,19 +35,19 @@ QString interfaceKindToString(const InterfaceKind kind) {
     case InterfaceKind::Ethernet:
         return QStringLiteral("Ethernet");
     case InterfaceKind::WiFi:
-        return QStringLiteral("WiFi");
+        return QStringLiteral("Wi-Fi");
     case InterfaceKind::Cellular:
-        return QStringLiteral("Cellular");
+        return QStringLiteral("Сотовая сеть");
     case InterfaceKind::VpnTunnel:
-        return QStringLiteral("VPN Tunnel");
+        return QStringLiteral("VPN-туннель");
     case InterfaceKind::VirtualOverlay:
-        return QStringLiteral("Virtual Overlay");
+        return QStringLiteral("Виртуальный оверлей");
     case InterfaceKind::VirtualOther:
-        return QStringLiteral("Virtual Other");
+        return QStringLiteral("Другое виртуальное");
     case InterfaceKind::Unknown:
-        return QStringLiteral("Unknown");
+        return QStringLiteral("Неизвестно");
     }
-    return QStringLiteral("Unknown");
+    return QStringLiteral("Неизвестно");
 }
 
 } // namespace gpd::core

@@ -18,7 +18,7 @@ public:
 
     void start();
     void stop();
-    void enqueue(const QString& targetIp, std::uint16_t port, int timeoutMs = 1500);
+    void enqueue(const QString& targetKey, const QString& targetIp, const QString& localBindIp, std::uint16_t port, int timeoutMs = 1500);
 
 Q_SIGNALS:
     void pingCompleted(QString targetIp, gpd::platform::PingResult result);

@@ -82,6 +82,7 @@ QVector<gpd::core::NetworkInterfaceInfo> InterfaceInspectorWin::listInterfaces()
         gpd::core::NetworkInterfaceInfo info;
         info.ifIndex = adapter->IfIndex;
         info.luid = adapter->Luid.Value;
+        info.adapterName = adapter->AdapterName != nullptr ? QString::fromUtf8(adapter->AdapterName) : QString();
         info.friendlyName = adapter->FriendlyName != nullptr ? QString::fromWCharArray(adapter->FriendlyName) : QStringLiteral("-");
         info.description = adapter->Description != nullptr ? QString::fromWCharArray(adapter->Description) : QStringLiteral("-");
         info.ifType = adapter->IfType;

@@ -7,7 +7,7 @@
 #include <icmpapi.h>
 
 #include <QDateTime>
-#include <QMetaObject>
+#include <QMetaType>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QQueue>
@@ -29,6 +29,7 @@ struct IcmpHandle {
 };
 
 struct PingTask {
+    QString key;
     QString ip;
     int timeoutMs{1000};
 };
@@ -69,7 +70,7 @@ protected:
             in_addr addr4{};
             if (InetPtonW(AF_INET, reinterpret_cast<LPCWSTR>(task.ip.utf16()), &addr4) != 1 || icmp4.handle == INVALID_HANDLE_VALUE) {
                 result.errorMessage = QStringLiteral("Unsupported IP or ICMP init failed");
-                QMetaObject::invokeMethod(owner_, [owner = owner_, ip = task.ip, result]() { Q_EMIT owner->pingCompleted(ip, result); }, Qt::QueuedConnection);
+                Q_EMIT owner_->pingCompleted(task.key, result);
                 continue;
             }
 
@@ -91,21 +92,28 @@ protected:
                 if (err != IP_REQ_TIMED_OUT && err != IP_DEST_NET_UNREACHABLE && err != IP_DEST_HOST_UNREACHABLE) {
                     result.errorMessage = QStringLiteral("ICMP error %1").arg(err);
                 }
-                QMetaObject::invokeMethod(owner_, [owner = owner_, ip = task.ip, result]() { Q_EMIT owner->pingCompleted(ip, result); }, Qt::QueuedConnection);
+                Q_EMIT owner_->pingCompleted(task.key, result);
                 continue;
             }
 
             auto* echo = reinterpret_cast<ICMP_ECHO_REPLY*>(buffer);
-            result.timedOut = false;
-            result.rttMs = static_cast<int>(echo->RoundTripTime);
-            if (result.rttMs < 0) {
-                result.rttMs = static_cast<int>(GetTickCount() - started);
+            if (echo->Status == IP_SUCCESS) {
+                result.timedOut = false;
+                result.rttMs = static_cast<int>(echo->RoundTripTime);
+                if (result.rttMs < 0) {
+                    result.rttMs = static_cast<int>(GetTickCount() - started);
+                }
+                if (result.rttMs <= 0) {
+                    result.rttMs = 1;
+                }
+                result.respondingAddress = task.ip;
+            } else if (echo->Status == IP_REQ_TIMED_OUT) {
+                result.timedOut = true;
+            } else {
+                result.timedOut = true;
+                result.errorMessage = QStringLiteral("ICMP status %1").arg(echo->Status);
             }
-            if (result.rttMs <= 0) {
-                result.rttMs = 1;
-            }
-            result.respondingAddress = task.ip;
-            QMetaObject::invokeMethod(owner_, [owner = owner_, ip = task.ip, result]() { Q_EMIT owner->pingCompleted(ip, result); }, Qt::QueuedConnection);
+            Q_EMIT owner_->pingCompleted(task.key, result);
         }
     }
 
@@ -124,7 +132,9 @@ struct PingProbeWin::Impl {
 
 PingProbeWin::PingProbeWin(QObject* parent)
     : QObject(parent)
-    , impl_(std::make_unique<Impl>()) {}
+    , impl_(std::make_unique<Impl>()) {
+    qRegisterMetaType<gpd::platform::PingResult>("gpd::platform::PingResult");
+}
 
 PingProbeWin::~PingProbeWin() {
     stop();
@@ -148,11 +158,11 @@ void PingProbeWin::stop() {
     impl_->worker.reset();
 }
 
-void PingProbeWin::enqueue(const QString& targetIp, const int pingTimeoutMs) {
+void PingProbeWin::enqueue(const QString& targetKey, const QString& targetIp, const int pingTimeoutMs) {
     if (!impl_->worker || !impl_->worker->isRunning()) {
         return;
     }
-    impl_->worker->enqueue(PingTask{targetIp, pingTimeoutMs});
+    impl_->worker->enqueue(PingTask{targetKey, targetIp, pingTimeoutMs});
 }
 
 } // namespace gpd::platform

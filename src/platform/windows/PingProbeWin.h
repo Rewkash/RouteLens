@@ -24,7 +24,7 @@ public:
 
     [[nodiscard]] bool start();
     void stop();
-    void enqueue(const QString& targetIp, int pingTimeoutMs = 1000);
+    void enqueue(const QString& targetKey, const QString& targetIp, int pingTimeoutMs = 1000);
 
 Q_SIGNALS:
     void pingCompleted(QString targetIp, gpd::platform::PingResult result);
@@ -35,3 +35,5 @@ private:
 };
 
 } // namespace gpd::platform
+
+Q_DECLARE_METATYPE(gpd::platform::PingResult)

@@ -6,6 +6,7 @@
 #include "core/TunnelCorrelator.h"
 #include "core/TunnelProcessRegistry.h"
 #include "core/UdpFlowAggregator.h"
+#include "core/diagnostic/DiagnosticRuleEngine.h"
 #include "platform/windows/ConnectionScannerWin.h"
 #include "platform/windows/EtwNetworkTap.h"
 #include "platform/windows/InterfaceInspectorWin.h"
@@ -248,6 +249,29 @@ int main(int argc, char** argv) {
         expectTrue(!geo.isReady());
         const auto info = geo.lookup(QStringLiteral("8.8.8.8"));
         expectTrue(!info.resolved);
+    }
+
+    {
+        gpd::core::DiagnosticRuleEngine rules;
+        QHash<QString, QVariantMap> snapshots;
+        QVariantMap wifi;
+        wifi.insert(QStringLiteral("rssidBm"), -85);
+        QVariantMap adapter;
+        adapter.insert(QStringLiteral("inErrorsPerSec"), 5.0);
+        adapter.insert(QStringLiteral("outErrorsPerSec"), 0.0);
+        snapshots.insert(QStringLiteral("wifi_metrics"), wifi);
+        snapshots.insert(QStringLiteral("adapter_errors"), adapter);
+        const auto report = rules.buildReport(QStringLiteral("155.133.220.111"), 27015, QStringLiteral("cs2.exe"), snapshots);
+        expectTrue(!report.sections.isEmpty());
+        expectTrue(report.overallStatus == gpd::core::DiagnosticStatus::Problem || report.overallStatus == gpd::core::DiagnosticStatus::Severe);
+    }
+
+    {
+        expectTrue(gpd::core::DiagnosticRuleEngine::combineStatuses({gpd::core::DiagnosticStatus::Ok, gpd::core::DiagnosticStatus::Warning}) ==
+                   gpd::core::DiagnosticStatus::Warning);
+        expectTrue(gpd::core::DiagnosticRuleEngine::combineStatuses({gpd::core::DiagnosticStatus::Problem, gpd::core::DiagnosticStatus::Problem}) ==
+                   gpd::core::DiagnosticStatus::Severe);
+        expectTrue(gpd::core::DiagnosticRuleEngine::combineStatuses({gpd::core::DiagnosticStatus::Severe}) == gpd::core::DiagnosticStatus::Severe);
     }
 
     {

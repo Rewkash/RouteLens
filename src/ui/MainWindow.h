@@ -11,6 +11,7 @@
 #include <memory>
 
 class QDateTime;
+class QPlainTextEdit;
 
 class QComboBox;
 class QPushButton;
@@ -18,6 +19,7 @@ class QTableWidget;
 class QTimer;
 class QLabel;
 class QAction;
+class QProgressBar;
 
 namespace gpd::platform {
 class ProcessMonitorWin;
@@ -30,6 +32,8 @@ class EtwNetworkTap;
 namespace gpd::core {
 class ClashApiClient;
 class ClashConnectionMatcher;
+class DiagnosticEngine;
+struct DiagnosticReport;
 class UdpFlowAggregator;
 class GeoIpResolver;
 class PingScheduler;
@@ -78,6 +82,7 @@ private:
     void restoreTableSortState();
     void persistTableSortState() const;
     void routeToTunnelCorrelator(const QVector<gpd::core::UdpFlowEvent>& events);
+    void renderDiagnosticReport(const gpd::core::DiagnosticReport& report);
 
     QComboBox* processCombo_{nullptr};
     QPushButton* refreshButton_{nullptr};
@@ -88,6 +93,10 @@ private:
     QLabel* etwStatusLabel_{nullptr};
     QLabel* geoStatusLabel_{nullptr};
     QLabel* clashStatusLabel_{nullptr};
+    QPushButton* runDiagnosticButton_{nullptr};
+    QPushButton* exportDiagnosticButton_{nullptr};
+    QProgressBar* diagnosticProgress_{nullptr};
+    QPlainTextEdit* diagnosticsView_{nullptr};
     QAction* configureGeoIpAction_{nullptr};
     QTimer* refreshTimer_{nullptr};
     QTimer* pruneTimer_{nullptr};
@@ -108,10 +117,12 @@ private:
     std::unique_ptr<gpd::platform::TcpPingProbeWin> tcpPingProbe_;
     std::unique_ptr<gpd::core::PingScheduler> pingScheduler_;
     std::unique_ptr<gpd::core::TunnelCorrelator> tunnelCorrelator_;
+    std::unique_ptr<gpd::core::DiagnosticEngine> diagnosticEngine_;
     QVector<gpd::core::NetworkInterfaceInfo> cachedInterfaces_;
     QHash<std::uint32_t, gpd::core::NetworkInterfaceInfo> cachedInterfacesByIndex_;
     QHash<QString, std::uint32_t> interfaceIndexByLocalIp_;
     QHash<std::uint32_t, QString> registeredTunnelPids_;
+    QVector<gpd::core::ConnectionInfo> lastConnections_;
     int sortColumn_{0};
     Qt::SortOrder sortOrder_{Qt::AscendingOrder};
 

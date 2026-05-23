@@ -7,6 +7,8 @@
 #include "core/InterfaceClassifier.h"
 #include "core/Models.h"
 #include "core/PingScheduler.h"
+#include "core/diagnostic/DiagnosticEngine.h"
+#include "core/diagnostic/DiagnosticTypes.h"
 #include "core/RouteClassifier.h"
 #include "core/TunnelCorrelator.h"
 #include "core/TunnelProcessRegistry.h"
@@ -29,19 +31,28 @@
 #include <QColor>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QLabel>
 #include <QMenuBar>
 #include <QDebug>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
+#include <QProgressBar>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSet>
 #include <QUrl>
+#include <QTabWidget>
+#include <QFileDialog>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTimer>
+#include <QPlainTextEdit>
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QWidget>
@@ -157,7 +168,9 @@ MainWindow::MainWindow(QWidget* parent)
     , pingProbe_(std::make_unique<gpd::platform::PingProbeWin>())
     , tcpPingProbe_(std::make_unique<gpd::platform::TcpPingProbeWin>())
     , pingScheduler_(std::make_unique<gpd::core::PingScheduler>(pingProbe_.get(), tcpPingProbe_.get()))
-    , tunnelCorrelator_(std::make_unique<gpd::core::TunnelCorrelator>(5000)) {
+    , tunnelCorrelator_(std::make_unique<gpd::core::TunnelCorrelator>(5000))
+    , diagnosticEngine_(std::make_unique<gpd::core::DiagnosticEngine>(pingScheduler_.get(), this)) {
+    diagnosticEngine_->setUdpFlowAggregator(udpFlows_.get());
     buildUi();
 }
 
@@ -174,44 +187,50 @@ void MainWindow::buildUi() {
     auto* topLayout = makeQtOwned<QHBoxLayout>(topBar);
     topLayout->setContentsMargins(0, 0, 0, 0);
 
-    topLayout->addWidget(makeQtOwned<QLabel>(tr("Game process:"), topBar));
+    topLayout->addWidget(makeQtOwned<QLabel>(tr("Игровой процесс:"), topBar));
     processCombo_ = makeQtOwned<QComboBox>(topBar);
     processCombo_->setMinimumWidth(360);
     topLayout->addWidget(processCombo_, 1);
 
-    refreshButton_ = makeQtOwned<QPushButton>(tr("Refresh"), topBar);
+    refreshButton_ = makeQtOwned<QPushButton>(tr("Обновить"), topBar);
     topLayout->addWidget(refreshButton_);
 
-    startStopButton_ = makeQtOwned<QPushButton>(tr("Start monitoring"), topBar);
+    startStopButton_ = makeQtOwned<QPushButton>(tr("Запустить мониторинг"), topBar);
     topLayout->addWidget(startStopButton_);
 
-    etwStatusLabel_ = makeQtOwned<QLabel>(tr("○ ETW: off"), topBar);
+    etwStatusLabel_ = makeQtOwned<QLabel>(tr("○ ETW: выкл"), topBar);
     topLayout->addWidget(etwStatusLabel_);
-    geoStatusLabel_ = makeQtOwned<QLabel>(tr("○ GeoIP: missing"), topBar);
+    geoStatusLabel_ = makeQtOwned<QLabel>(tr("○ GeoIP: отсутствует"), topBar);
     topLayout->addWidget(geoStatusLabel_);
-    clashStatusLabel_ = makeQtOwned<QLabel>(tr("○ Clash API: off"), topBar);
+    clashStatusLabel_ = makeQtOwned<QLabel>(tr("○ Clash API: выкл"), topBar);
     topLayout->addWidget(clashStatusLabel_);
     root->addWidget(topBar);
 
-    auto* settingsMenu = menuBar()->addMenu(tr("Settings"));
-    configureGeoIpAction_ = settingsMenu->addAction(tr("Configure GeoIP databases..."));
+    auto* settingsMenu = menuBar()->addMenu(tr("Настройки"));
+    configureGeoIpAction_ = settingsMenu->addAction(tr("Настроить базы GeoIP..."));
 
     verdictBadge_ = makeQtOwned<VerdictBadge>(central);
-    verdictBadge_->setVerdict({gpd::core::RouteVerdict::Unknown, 0, tr("Monitoring is not started yet.")});
+    verdictBadge_->setVerdict({gpd::core::RouteVerdict::Unknown, 0, tr("Мониторинг еще не запущен.")});
     root->addWidget(verdictBadge_);
 
-    connectionTable_ = makeQtOwned<QTableWidget>(0, 10, central);
+    auto* tabs = makeQtOwned<QTabWidget>(central);
+
+    auto* monitorPage = makeQtOwned<QWidget>(tabs);
+    auto* monitorLayout = makeQtOwned<QVBoxLayout>(monitorPage);
+    monitorLayout->setContentsMargins(0, 0, 0, 0);
+
+    connectionTable_ = makeQtOwned<QTableWidget>(0, 10, monitorPage);
     connectionTable_->setHorizontalHeaderLabels({
-        tr("Remote IP"),
-        tr("Port"),
-        tr("Protocol"),
-        tr("Country"),
+        tr("Удаленный IP"),
+        tr("Порт"),
+        tr("Протокол"),
+        tr("Страна"),
         tr("ASN"),
-        tr("RTT avg"),
-        tr("Jitter"),
-        tr("Loss %"),
-        tr("Interface"),
-        tr("Verdict"),
+        tr("RTT ср."),
+        tr("Джиттер"),
+        tr("Потери %"),
+        tr("Интерфейс"),
+        tr("Вердикт"),
     });
     connectionTable_->horizontalHeader()->setStretchLastSection(true);
     connectionTable_->verticalHeader()->setVisible(false);
@@ -219,12 +238,32 @@ void MainWindow::buildUi() {
     connectionTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     connectionTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     connectionTable_->setSortingEnabled(true);
-    root->addWidget(connectionTable_, 1);
+    monitorLayout->addWidget(connectionTable_, 1);
 
-    interfacesPanel_ = makeQtOwned<InterfacesPanel>(central);
-    root->addWidget(interfacesPanel_);
+    interfacesPanel_ = makeQtOwned<InterfacesPanel>(monitorPage);
+    monitorLayout->addWidget(interfacesPanel_);
 
-    auto* footer = makeQtOwned<QLabel>(tr("Select a process and start monitoring to view live TCP/UDP connections."), central);
+    tabs->addTab(monitorPage, tr("Соединения"));
+
+    auto* diagnosticsPage = makeQtOwned<QWidget>(tabs);
+    auto* diagnosticsLayout = makeQtOwned<QVBoxLayout>(diagnosticsPage);
+    diagnosticsLayout->setContentsMargins(0, 0, 0, 0);
+    runDiagnosticButton_ = makeQtOwned<QPushButton>(tr("Запустить полную диагностику"), diagnosticsPage);
+    diagnosticsLayout->addWidget(runDiagnosticButton_);
+    exportDiagnosticButton_ = makeQtOwned<QPushButton>(tr("Экспорт отчета"), diagnosticsPage);
+    diagnosticsLayout->addWidget(exportDiagnosticButton_);
+    diagnosticProgress_ = makeQtOwned<QProgressBar>(diagnosticsPage);
+    diagnosticProgress_->setRange(0, 100);
+    diagnosticProgress_->setValue(0);
+    diagnosticsLayout->addWidget(diagnosticProgress_);
+    diagnosticsView_ = makeQtOwned<QPlainTextEdit>(diagnosticsPage);
+    diagnosticsView_->setReadOnly(true);
+    diagnosticsLayout->addWidget(diagnosticsView_, 1);
+    tabs->addTab(diagnosticsPage, tr("Диагностика"));
+
+    root->addWidget(tabs, 1);
+
+    auto* footer = makeQtOwned<QLabel>(tr("Выберите процесс и запустите мониторинг, чтобы видеть живые TCP/UDP соединения."), central);
     footer->setWordWrap(true);
     root->addWidget(footer);
 
@@ -253,58 +292,58 @@ void MainWindow::buildUi() {
     connect(etwTap_.get(), &gpd::platform::EtwNetworkTap::statusChanged, this, [this](const gpd::platform::EtwStatus status) {
         switch (status) {
         case gpd::platform::EtwStatus::Running:
-            etwStatusLabel_->setText(QStringLiteral("● ETW: running"));
+            etwStatusLabel_->setText(QStringLiteral("● ETW: работает"));
             etwStatusLabel_->setStyleSheet(QStringLiteral("QLabel { color: #37b24d; font-weight: 600; }"));
             break;
         case gpd::platform::EtwStatus::Failed:
-            etwStatusLabel_->setText(QStringLiteral("● ETW: failed"));
+            etwStatusLabel_->setText(QStringLiteral("● ETW: ошибка"));
             etwStatusLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f03e3e; font-weight: 600; }"));
             etwStatusLabel_->setToolTip(etwTap_->lastError().message);
             break;
         case gpd::platform::EtwStatus::Starting:
-            etwStatusLabel_->setText(QStringLiteral("○ ETW: starting"));
+            etwStatusLabel_->setText(QStringLiteral("○ ETW: запуск"));
             etwStatusLabel_->setStyleSheet(QStringLiteral("QLabel { color: #fab005; font-weight: 600; }"));
             break;
         case gpd::platform::EtwStatus::Stopped:
-            etwStatusLabel_->setText(QStringLiteral("○ ETW: off"));
+            etwStatusLabel_->setText(QStringLiteral("○ ETW: выкл"));
             etwStatusLabel_->setStyleSheet(QString());
             break;
         }
     });
     connect(geoIp_.get(), &gpd::core::GeoIpResolver::statusChanged, this, [this](const bool ready) {
-        geoStatusLabel_->setText(ready ? QStringLiteral("● GeoIP: ready") : QStringLiteral("○ GeoIP: missing"));
+        geoStatusLabel_->setText(ready ? QStringLiteral("● GeoIP: готово") : QStringLiteral("○ GeoIP: отсутствует"));
         geoStatusLabel_->setStyleSheet(ready ? QStringLiteral("QLabel { color: #37b24d; font-weight: 600; }") : QString());
     });
     connect(clashApi_.get(), &gpd::core::ClashApiClient::snapshotUpdated, this, [this](const gpd::core::ClashApiSnapshot& snap) {
         clashMatcher_->rebuildIndex(snap);
-        clashStatusLabel_->setText(QStringLiteral("● Clash API: connected (%1)").arg(snap.connections.size()));
+        clashStatusLabel_->setText(QStringLiteral("● Clash API: подключено (%1)").arg(snap.connections.size()));
         clashStatusLabel_->setStyleSheet(QStringLiteral("QLabel { color: #37b24d; font-weight: 600; }"));
     });
     connect(clashApi_.get(), &gpd::core::ClashApiClient::statusChanged, this, [this](const gpd::core::ClashApiStatus status) {
         switch (status) {
         case gpd::core::ClashApiStatus::Connected:
-            clashStatusLabel_->setText(QStringLiteral("● Clash API: connected"));
+            clashStatusLabel_->setText(QStringLiteral("● Clash API: подключено"));
             clashStatusLabel_->setStyleSheet(QStringLiteral("QLabel { color: #37b24d; font-weight: 600; }"));
             break;
         case gpd::core::ClashApiStatus::Disabled:
-            clashStatusLabel_->setText(QStringLiteral("○ Clash API: off"));
+            clashStatusLabel_->setText(QStringLiteral("○ Clash API: выкл"));
             clashStatusLabel_->setStyleSheet(QString());
             break;
         case gpd::core::ClashApiStatus::Probing:
         case gpd::core::ClashApiStatus::Connecting:
-            clashStatusLabel_->setText(QStringLiteral("○ Clash API: connecting"));
+            clashStatusLabel_->setText(QStringLiteral("○ Clash API: подключение"));
             clashStatusLabel_->setStyleSheet(QStringLiteral("QLabel { color: #fab005; font-weight: 600; }"));
             break;
         case gpd::core::ClashApiStatus::AuthFailed:
-            clashStatusLabel_->setText(QStringLiteral("● Clash API: auth failed"));
+            clashStatusLabel_->setText(QStringLiteral("● Clash API: ошибка авторизации"));
             clashStatusLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f03e3e; font-weight: 600; }"));
             break;
         case gpd::core::ClashApiStatus::Unreachable:
-            clashStatusLabel_->setText(QStringLiteral("● Clash API: unreachable"));
+            clashStatusLabel_->setText(QStringLiteral("● Clash API: недоступно"));
             clashStatusLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f03e3e; font-weight: 600; }"));
             break;
         case gpd::core::ClashApiStatus::InvalidResponse:
-            clashStatusLabel_->setText(QStringLiteral("● Clash API: invalid response"));
+            clashStatusLabel_->setText(QStringLiteral("● Clash API: некорректный ответ"));
             clashStatusLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f03e3e; font-weight: 600; }"));
             break;
         }
@@ -322,6 +361,108 @@ void MainWindow::buildUi() {
         if (!monitoring_) {
             refreshConnections();
         }
+    });
+    connect(runDiagnosticButton_, &QPushButton::clicked, this, [this]() {
+        const auto isUsableRemote = [](const gpd::core::ConnectionInfo& c) {
+            if (!c.hasRemoteEndpoint || c.remotePort == 0 || c.remoteAddress.startsWith(QLatin1Char('('))) {
+                return false;
+            }
+            if (c.remoteAddress == QStringLiteral("127.0.0.1") || c.remoteAddress == QStringLiteral("::1") ||
+                c.remoteAddress == QStringLiteral("0.0.0.0") || c.remoteAddress == QStringLiteral("::")) {
+                return false;
+            }
+            return true;
+        };
+
+        QVector<int> candidateIndices;
+        QStringList candidateLabels;
+        for (int i = 0; i < lastConnections_.size(); ++i) {
+            const auto& c = lastConnections_[i];
+            if (!isUsableRemote(c)) {
+                continue;
+            }
+            const QString label = QStringLiteral("%1:%2 (%3)")
+                                      .arg(c.remoteAddress)
+                                      .arg(c.remotePort)
+                                      .arg(c.protocol == gpd::core::TransportProtocol::Tcp ? QStringLiteral("TCP") : QStringLiteral("UDP"));
+            if (candidateLabels.contains(label)) {
+                continue;
+            }
+            candidateIndices.push_back(i);
+            candidateLabels.push_back(label);
+        }
+
+        if (!candidateLabels.isEmpty()) {
+            bool ok = false;
+            const QString chosen = QInputDialog::getItem(this,
+                                                         tr("Цель диагностики"),
+                                                         tr("Выберите удаленный IP/порт для полной диагностики:"),
+                                                         candidateLabels,
+                                                         0,
+                                                         false,
+                                                         &ok);
+            if (!ok || chosen.isEmpty()) {
+                return;
+            }
+            const int selectedPos = candidateLabels.indexOf(chosen);
+            if (selectedPos >= 0 && selectedPos < candidateIndices.size()) {
+                const auto& selected = lastConnections_[candidateIndices[selectedPos]];
+                diagnosticEngine_->setTarget(selected.remoteAddress, selected.remotePort, processCombo_->currentText(), selected.localAddress);
+                diagnosticEngine_->setConnectionContext(selected);
+                diagnosticEngine_->setTargetPid(selected.pid);
+            }
+        }
+
+        diagnosticEngine_->runFullDiagnostic();
+    });
+    connect(exportDiagnosticButton_, &QPushButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getSaveFileName(this,
+                                                          tr("Экспорт диагностического отчета"),
+                                                          QStringLiteral("diagnostic_report.json"),
+                                                          tr("Файлы JSON (*.json)"));
+        if (path.isEmpty()) {
+            return;
+        }
+        const auto report = diagnosticEngine_->currentReport();
+        QJsonObject root;
+        root.insert(QStringLiteral("targetIp"), report.targetIp);
+        root.insert(QStringLiteral("targetPort"), report.targetPort);
+        root.insert(QStringLiteral("targetProcessName"), report.targetProcessName);
+        root.insert(QStringLiteral("overallStatus"), gpd::core::diagnosticStatusToString(report.overallStatus));
+        root.insert(QStringLiteral("startedAtMs"), static_cast<qint64>(report.startedAtMs));
+        root.insert(QStringLiteral("completedAtMs"), static_cast<qint64>(report.completedAtMs));
+        QJsonArray sections;
+        for (const auto& section : report.sections) {
+            QJsonObject s;
+            s.insert(QStringLiteral("id"), section.id);
+            s.insert(QStringLiteral("title"), section.title);
+            s.insert(QStringLiteral("status"), gpd::core::diagnosticStatusToString(section.overallStatus));
+            QJsonArray findings;
+            for (const auto& finding : section.findings) {
+                QJsonObject f;
+                f.insert(QStringLiteral("title"), finding.title);
+                f.insert(QStringLiteral("metric"), finding.metric);
+                f.insert(QStringLiteral("status"), gpd::core::diagnosticStatusToString(finding.status));
+                f.insert(QStringLiteral("recommendation"), finding.recommendation);
+                f.insert(QStringLiteral("timestampMs"), static_cast<qint64>(finding.timestampMs));
+                findings.push_back(f);
+            }
+            s.insert(QStringLiteral("findings"), findings);
+            sections.push_back(s);
+        }
+        root.insert(QStringLiteral("sections"), sections);
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            const QJsonDocument doc(root);
+            file.write(doc.toJson(QJsonDocument::Indented));
+            file.close();
+        }
+    });
+    connect(diagnosticEngine_.get(), &gpd::core::DiagnosticEngine::reportUpdated, this, &MainWindow::renderDiagnosticReport);
+    connect(diagnosticEngine_.get(), &gpd::core::DiagnosticEngine::fullDiagnosticCompleted, this, &MainWindow::renderDiagnosticReport);
+    connect(diagnosticEngine_.get(), &gpd::core::DiagnosticEngine::fullDiagnosticProgress, this, [this](const int p, const QString& step) {
+        diagnosticProgress_->setValue(qBound(0, p, 100));
+        diagnosticProgress_->setFormat(QStringLiteral("%1% - %2").arg(p).arg(step));
     });
     connect(interfacesPanel_, &InterfacesPanel::interfaceActivated, this, &MainWindow::showInterfaceDetails);
 
@@ -389,7 +530,7 @@ void MainWindow::refreshProcesses() {
             continue;
         }
         processCombo_->addItem(
-            QStringLiteral("%1 (%2) - %3").arg(process.name).arg(process.pid).arg(tr("connections: %1").arg(count)),
+            QStringLiteral("%1 (%2) - %3").arg(process.name).arg(process.pid).arg(tr("соединений: %1").arg(count)),
             QVariant::fromValue(process.pid));
     }
 
@@ -409,7 +550,7 @@ void MainWindow::refreshProcesses() {
     startStopButton_->setEnabled(hasProcesses);
 
     if (!hasProcesses) {
-        processCombo_->addItem(tr("No processes with active sockets"), QVariant::fromValue(0U));
+        processCombo_->addItem(tr("Нет процессов с активными сокетами"), QVariant::fromValue(0U));
         processCombo_->setEnabled(false);
         startStopButton_->setEnabled(false);
     }
@@ -464,14 +605,14 @@ void MainWindow::refreshConnections() {
                 connection.clashRule = clashMatch->rule;
                 connection.clashChains = clashMatch->chains;
                 if (connection.clashOutbound.compare(QStringLiteral("DIRECT"), Qt::CaseInsensitive) == 0) {
-                    connection.proxyStatus = QStringLiteral("Not proxied");
-                    connection.perRowVerdict = QStringLiteral("Direct (clash: DIRECT)");
+                    connection.proxyStatus = QStringLiteral("Без прокси");
+                    connection.perRowVerdict = QStringLiteral("Напрямую (clash: DIRECT)");
                 } else if (connection.clashOutbound.compare(QStringLiteral("REJECT"), Qt::CaseInsensitive) == 0) {
-                    connection.proxyStatus = QStringLiteral("Blocked");
-                    connection.perRowVerdict = QStringLiteral("Blocked by clash");
+                    connection.proxyStatus = QStringLiteral("Заблокировано");
+                    connection.perRowVerdict = QStringLiteral("Заблокировано через clash");
                 } else if (!connection.clashOutbound.isEmpty()) {
-                    connection.proxyStatus = QStringLiteral("Proxied");
-                    connection.perRowVerdict = QStringLiteral("Proxied via %1 (clash)").arg(connection.clashOutbound);
+                    connection.proxyStatus = QStringLiteral("Через прокси");
+                    connection.perRowVerdict = QStringLiteral("Через %1 (clash)").arg(connection.clashOutbound);
                 }
             }
         }
@@ -495,8 +636,8 @@ void MainWindow::refreshConnections() {
                 connection.routedThroughKind == gpd::core::InterfaceKind::Cellular) {
                 connection.tunnelProcessCorrelated = false;
                 connection.correlatedTunnelProcessName.clear();
-                connection.proxyStatus = QStringLiteral("Not proxied");
-                connection.perRowVerdict = QStringLiteral("Direct via %1").arg(connection.routedThroughInterfaceName);
+                connection.proxyStatus = QStringLiteral("Без прокси");
+                connection.perRowVerdict = QStringLiteral("Напрямую через %1").arg(connection.routedThroughInterfaceName);
             } else if (connection.routedThroughKind == gpd::core::InterfaceKind::VpnTunnel ||
                        connection.routedThroughKind == gpd::core::InterfaceKind::VirtualOverlay) {
                 const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -507,20 +648,20 @@ void MainWindow::refreshConnections() {
                     connection.tunnelProcessCorrelated = true;
                     connection.correlatedTunnelProcessName = tunnelProcess;
                     if (tunnelSawSameRemote) {
-                        connection.proxyStatus = QStringLiteral("Direct inside TUN (likely)");
-                        connection.perRowVerdict = QStringLiteral("Direct inside TUN (likely) via %1").arg(connection.routedThroughInterfaceName);
+                        connection.proxyStatus = QStringLiteral("Напрямую внутри TUN (вероятно)");
+                        connection.perRowVerdict = QStringLiteral("Напрямую внутри TUN (вероятно) через %1").arg(connection.routedThroughInterfaceName);
                     } else if (tunnelSawOtherRemote) {
-                        connection.proxyStatus = QStringLiteral("Proxied (likely)");
-                        connection.perRowVerdict = QStringLiteral("Proxied (likely) via %1.exe").arg(tunnelProcess);
+                        connection.proxyStatus = QStringLiteral("Через прокси (вероятно)");
+                        connection.perRowVerdict = QStringLiteral("Через прокси (вероятно) via %1.exe").arg(tunnelProcess);
                     } else {
-                        connection.proxyStatus = QStringLiteral("Proxied");
-                        connection.perRowVerdict = QStringLiteral("Proxied via %1.exe").arg(tunnelProcess);
+                        connection.proxyStatus = QStringLiteral("Через прокси");
+                        connection.perRowVerdict = QStringLiteral("Через %1.exe").arg(tunnelProcess);
                     }
                 } else {
                     connection.tunnelProcessCorrelated = false;
                     connection.correlatedTunnelProcessName.clear();
-                    connection.proxyStatus = QStringLiteral("Unknown (TUN interface)");
-                    connection.perRowVerdict = QStringLiteral("Tunneled (suspected) via %1").arg(connection.routedThroughInterfaceName);
+                    connection.proxyStatus = QStringLiteral("Неизвестно (TUN интерфейс)");
+                    connection.perRowVerdict = QStringLiteral("Туннелируется (предположительно) через %1").arg(connection.routedThroughInterfaceName);
                 }
             }
         }
@@ -530,6 +671,7 @@ void MainWindow::refreshConnections() {
 }
 
 void MainWindow::applyRefreshResult(const RefreshResult& result) {
+    lastConnections_ = result.connections;
     qInfo() << "RouteLens refresh pid" << result.selectedPid << "raw" << result.rawConnectionCount << "enriched" << result.connections.size()
             << "etw" << result.etwRunning;
     connectionTable_->setSortingEnabled(false);
@@ -578,6 +720,39 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
 
     verdictBadge_->setVerdict(result.verdict);
     interfacesPanel_->setInterfaces(result.interfaces);
+
+    if (!result.connections.isEmpty()) {
+        const gpd::core::ConnectionInfo* selected = nullptr;
+        const auto isUsableRemote = [](const gpd::core::ConnectionInfo& c) {
+            if (!c.hasRemoteEndpoint || c.remotePort == 0 || c.remoteAddress.startsWith(QLatin1Char('('))) {
+                return false;
+            }
+            if (c.remoteAddress == QStringLiteral("127.0.0.1") || c.remoteAddress == QStringLiteral("::1") ||
+                c.remoteAddress == QStringLiteral("0.0.0.0") || c.remoteAddress == QStringLiteral("::")) {
+                return false;
+            }
+            return true;
+        };
+
+        for (const auto& c : result.connections) {
+            if (isUsableRemote(c) && c.hasPublicRemoteEndpoint) {
+                selected = &c;
+                break;
+            }
+        }
+        for (const auto& c : result.connections) {
+            if (selected == nullptr && isUsableRemote(c)) {
+                selected = &c;
+                break;
+            }
+        }
+        if (selected == nullptr) {
+            selected = &result.connections.first();
+        }
+        diagnosticEngine_->setTarget(selected->remoteAddress, selected->remotePort, processCombo_->currentText(), selected->localAddress);
+        diagnosticEngine_->setConnectionContext(*selected);
+        diagnosticEngine_->setTargetPid(selected->pid);
+    }
 }
 
 void MainWindow::updateCachedInterfaces(const bool forceUpdate) {
@@ -602,12 +777,13 @@ void MainWindow::updateCachedInterfaces(const bool forceUpdate) {
 void MainWindow::updateMonitoringState() {
     monitoring_ = !monitoring_;
     if (monitoring_) {
-        startStopButton_->setText(tr("Stop"));
+        startStopButton_->setText(tr("Остановить"));
         refreshTimer_->start();
-        verdictBadge_->setVerdict({gpd::core::RouteVerdict::Unknown, 5, tr("Connection scanning is active. Route verdict will arrive in later milestones.")});
+        verdictBadge_->setVerdict({gpd::core::RouteVerdict::Unknown, 5, tr("Сканирование соединений активно. Вердикт маршрута появится позже.")});
         pingProbe_->start();
         tcpPingProbe_->start();
         pingScheduler_->start();
+        diagnosticEngine_->startContinuous(5000);
         const bool etwStarted = etwTap_->start();
         if (!etwStarted && etwTap_->status() == gpd::platform::EtwStatus::Failed) {
             etwStatusLabel_->setToolTip(etwTap_->lastError().message);
@@ -621,10 +797,11 @@ void MainWindow::updateMonitoringState() {
     pruneTimer_->stop();
     etwTap_->stop();
     pingScheduler_->stop();
+    diagnosticEngine_->stop();
     pingProbe_->stop();
     tcpPingProbe_->stop();
-    startStopButton_->setText(tr("Start monitoring"));
-    verdictBadge_->setVerdict({gpd::core::RouteVerdict::Unknown, 0, tr("Monitoring is stopped.")});
+    startStopButton_->setText(tr("Запустить мониторинг"));
+    verdictBadge_->setVerdict({gpd::core::RouteVerdict::Unknown, 0, tr("Мониторинг остановлен.")});
 }
 
 void MainWindow::routeToTunnelCorrelator(const QVector<gpd::core::UdpFlowEvent>& events) {
@@ -673,7 +850,7 @@ void MainWindow::fillConnectionRow(const int row, const gpd::core::ConnectionInf
     if (!connection.hasPublicRemoteEndpoint) {
         countryText = QStringLiteral("-");
     } else if (connection.geoInfo.isPrivate) {
-        countryText = QStringLiteral("Private");
+        countryText = QStringLiteral("Частная сеть");
         asnText = QStringLiteral("—");
     } else if (!connection.geoInfo.resolved) {
         countryText = geoIp_->isReady() ? QStringLiteral("?") : QStringLiteral("-");
@@ -710,18 +887,18 @@ void MainWindow::fillConnectionRow(const int row, const gpd::core::ConnectionInf
         if (effectiveRttMs > 0) {
             rttText = QStringLiteral("%1 ms").arg(effectiveRttMs);
         } else {
-            rttText = QStringLiteral("n/a");
+            rttText = QStringLiteral("н/д");
         }
 
         if (state.syntheticRttMs > 0) {
             jitterText = QStringLiteral("%1 ms").arg(QString::number(state.jitterMs, 'f', 1));
             lossText = QStringLiteral("%1%").arg(QString::number(state.lossPercent, 'f', 1));
         } else {
-            jitterText = QStringLiteral("n/a");
-            lossText = QStringLiteral("n/a");
+            jitterText = QStringLiteral("н/д");
+            lossText = QStringLiteral("н/д");
         }
     } else if (connection.pingAggregate.unreachable) {
-        rttText = QStringLiteral("unreach");
+        rttText = QStringLiteral("недоступен");
         jitterText = QStringLiteral("—");
         lossText = QStringLiteral("100%");
     } else if (connection.pingAggregate.samplesInWindow >= 1 && connection.pingAggregate.rttAvgMs >= 0) {
@@ -743,7 +920,7 @@ void MainWindow::fillConnectionRow(const int row, const gpd::core::ConnectionInf
     if (connection.pingAggregate.icmpBlocked) {
         auto* rttItem = connectionTable_->item(row, 5);
         if (rttItem != nullptr) {
-            rttItem->setToolTip(QStringLiteral("ICMP blocked, using TCP fallback"));
+            rttItem->setToolTip(QStringLiteral("ICMP заблокирован, используется TCP fallback"));
         }
     }
     auto* interfaceItem = makeQtOwned<QTableWidgetItem>(connection.routedThroughInterfaceName.isEmpty() ? QStringLiteral("-") : connection.routedThroughInterfaceName);
@@ -757,18 +934,18 @@ void MainWindow::fillConnectionRow(const int row, const gpd::core::ConnectionInf
 
 void MainWindow::configureGeoIp() {
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("Configure GeoIP databases"));
+    dialog.setWindowTitle(tr("Настройка баз GeoIP"));
     auto* layout = makeQtOwned<QVBoxLayout>(&dialog);
     const QString geoDir = gpd::core::GeoIpResolver::defaultGeoDirectory();
     auto* label = makeQtOwned<QLabel>(
-        tr("Place GeoLite2-Country.mmdb and GeoLite2-ASN.mmdb in:\n%1\n\nGet free databases from https://www.maxmind.com/en/geolite2/signup")
+        tr("Поместите GeoLite2-Country.mmdb и GeoLite2-ASN.mmdb в:\n%1\n\nБесплатные базы: https://www.maxmind.com/en/geolite2/signup")
             .arg(geoDir),
         &dialog);
     label->setWordWrap(true);
     layout->addWidget(label);
-    auto* openButton = makeQtOwned<QPushButton>(tr("Open data folder"), &dialog);
-    auto* reloadButton = makeQtOwned<QPushButton>(tr("Reload databases"), &dialog);
-    auto* closeButton = makeQtOwned<QPushButton>(tr("Close"), &dialog);
+    auto* openButton = makeQtOwned<QPushButton>(tr("Открыть папку данных"), &dialog);
+    auto* reloadButton = makeQtOwned<QPushButton>(tr("Перезагрузить базы"), &dialog);
+    auto* closeButton = makeQtOwned<QPushButton>(tr("Закрыть"), &dialog);
     layout->addWidget(openButton);
     layout->addWidget(reloadButton);
     layout->addWidget(closeButton);
@@ -782,26 +959,26 @@ void MainWindow::configureGeoIp() {
 
 void MainWindow::showInterfaceDetails(const gpd::core::NetworkInterfaceInfo& info) {
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("Interface details: %1").arg(info.friendlyName));
+    dialog.setWindowTitle(tr("Сведения об интерфейсе: %1").arg(info.friendlyName));
     dialog.resize(820, 560);
 
     auto* layout = makeQtOwned<QVBoxLayout>(&dialog);
 
     QStringList lines;
     const QString ownerProcess = detectLikelyOwnerProcess(info);
-    lines.push_back(QStringLiteral("Friendly name: %1").arg(info.friendlyName));
-    lines.push_back(QStringLiteral("Description: %1").arg(info.description));
-    lines.push_back(QStringLiteral("Adapter name: %1").arg(info.adapterName.isEmpty() ? QStringLiteral("-") : info.adapterName));
+    lines.push_back(QStringLiteral("Имя: %1").arg(info.friendlyName));
+    lines.push_back(QStringLiteral("Описание: %1").arg(info.description));
+    lines.push_back(QStringLiteral("Имя адаптера: %1").arg(info.adapterName.isEmpty() ? QStringLiteral("-") : info.adapterName));
     lines.push_back(QStringLiteral("IfIndex: %1").arg(info.ifIndex));
     lines.push_back(QStringLiteral("LUID: %1").arg(info.luid));
-    lines.push_back(QStringLiteral("Kind: %1").arg(gpd::core::interfaceKindToString(info.kind)));
-    lines.push_back(QStringLiteral("Oper status: %1").arg(info.operStatus == 1U ? QStringLiteral("Up") : QStringLiteral("Down")));
+    lines.push_back(QStringLiteral("Тип: %1").arg(gpd::core::interfaceKindToString(info.kind)));
+    lines.push_back(QStringLiteral("Состояние: %1").arg(info.operStatus == 1U ? QStringLiteral("Вкл") : QStringLiteral("Выкл")));
     lines.push_back(QStringLiteral("IfType: %1, TunnelType: %2").arg(info.ifType).arg(info.tunnelType));
-    lines.push_back(QStringLiteral("DNS suffix: %1").arg(info.dnsSuffix.isEmpty() ? QStringLiteral("-") : info.dnsSuffix));
+    lines.push_back(QStringLiteral("DNS-суффикс: %1").arg(info.dnsSuffix.isEmpty() ? QStringLiteral("-") : info.dnsSuffix));
     lines.push_back(QStringLiteral("MAC: %1").arg(info.macAddress.isEmpty() ? QStringLiteral("-") : info.macAddress));
-    lines.push_back(QStringLiteral("IPs: %1").arg(info.unicastAddresses.isEmpty() ? QStringLiteral("-") : info.unicastAddresses.join(QStringLiteral(", "))));
-    lines.push_back(QStringLiteral("Gateways: %1").arg(info.gatewayAddresses.isEmpty() ? QStringLiteral("-") : info.gatewayAddresses.join(QStringLiteral(", "))));
-    lines.push_back(QStringLiteral("Owner process: %1").arg(ownerProcess.isEmpty() ? QStringLiteral("unknown") : ownerProcess));
+    lines.push_back(QStringLiteral("IP-адреса: %1").arg(info.unicastAddresses.isEmpty() ? QStringLiteral("-") : info.unicastAddresses.join(QStringLiteral(", "))));
+    lines.push_back(QStringLiteral("Шлюзы: %1").arg(info.gatewayAddresses.isEmpty() ? QStringLiteral("-") : info.gatewayAddresses.join(QStringLiteral(", "))));
+    lines.push_back(QStringLiteral("Процесс-владелец: %1").arg(ownerProcess.isEmpty() ? QStringLiteral("неизвестно") : ownerProcess));
 
     if (!ownerProcess.isEmpty()) {
         qInfo() << "Interface" << info.friendlyName << "likely created by" << ownerProcess;
@@ -814,10 +991,10 @@ void MainWindow::showInterfaceDetails(const gpd::core::NetworkInterfaceInfo& inf
     summary->setMinimumHeight(200);
     layout->addWidget(summary);
 
-    auto* routesLabel = makeQtOwned<QLabel>(tr("Routes using this interface (system route print):"), &dialog);
+    auto* routesLabel = makeQtOwned<QLabel>(tr("Маршруты через этот интерфейс (route print):"), &dialog);
     layout->addWidget(routesLabel);
 
-    QString routesText = tr("Failed to load routes.");
+    QString routesText = tr("Не удалось загрузить маршруты.");
     QProcess process;
     process.start(QStringLiteral("route"), {QStringLiteral("print"), QStringLiteral("-4")});
     if (process.waitForFinished(3000)) {
@@ -835,7 +1012,7 @@ void MainWindow::showInterfaceDetails(const gpd::core::NetworkInterfaceInfo& inf
             }
         }
         if (matched.isEmpty()) {
-            routesText = tr("No IPv4 route rows matched this IfIndex in route print output.");
+            routesText = tr("В выводе route print не найдено IPv4-маршрутов для этого IfIndex.");
         } else {
             routesText = matched.join(QStringLiteral("\n"));
         }
@@ -845,7 +1022,7 @@ void MainWindow::showInterfaceDetails(const gpd::core::NetworkInterfaceInfo& inf
     routes->setReadOnly(true);
     layout->addWidget(routes, 1);
 
-    auto* closeButton = makeQtOwned<QPushButton>(tr("Close"), &dialog);
+    auto* closeButton = makeQtOwned<QPushButton>(tr("Закрыть"), &dialog);
     connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
     layout->addWidget(closeButton);
 
@@ -865,6 +1042,28 @@ void MainWindow::persistTableSortState() const {
     QSettings settings;
     settings.setValue(QStringLiteral("ui/sortColumn"), sortColumn_);
     settings.setValue(QStringLiteral("ui/sortOrder"), static_cast<int>(sortOrder_));
+}
+
+void MainWindow::renderDiagnosticReport(const gpd::core::DiagnosticReport& report) {
+    if (diagnosticsView_ == nullptr) {
+        return;
+    }
+    QStringList lines;
+    lines.push_back(QStringLiteral("ОТЧЕТ О СОСТОЯНИИ СЕТИ"));
+    lines.push_back(QStringLiteral("Цель: %1:%2 (%3)").arg(report.targetIp).arg(report.targetPort).arg(report.targetProcessName));
+    lines.push_back(QStringLiteral("Итог: %1").arg(gpd::core::diagnosticStatusToString(report.overallStatus)));
+    lines.push_back(QString());
+    for (const auto& section : report.sections) {
+        lines.push_back(QStringLiteral("[%1] %2").arg(gpd::core::diagnosticStatusToString(section.overallStatus), section.title));
+        for (const auto& finding : section.findings) {
+            lines.push_back(QStringLiteral("  - %1: %2 (%3)").arg(finding.title, finding.metric, gpd::core::diagnosticStatusToString(finding.status)));
+            if (!finding.recommendation.isEmpty()) {
+                lines.push_back(QStringLiteral("    -> %1").arg(finding.recommendation));
+            }
+        }
+        lines.push_back(QString());
+    }
+    diagnosticsView_->setPlainText(lines.join(QStringLiteral("\n")));
 }
 
 } // namespace gpd::ui

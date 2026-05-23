@@ -3,7 +3,11 @@
 #include "platform/windows/WinapiUtils.h"
 #include "ui/MainWindow.h"
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
 #include <QMessageBox>
+#include <QDebug>
 #include <QPalette>
 #include <QColor>
 #include <QStringList>
@@ -13,6 +17,11 @@ namespace gpd::app {
 
 Application::Application(int& argc, char** argv)
     : QApplication(argc, argv) {
+    WSADATA wsa{};
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        qWarning() << "WSAStartup failed:" << WSAGetLastError();
+    }
+
     setApplicationName(QStringLiteral("RouteLens"));
     setApplicationDisplayName(tr("RouteLens"));
     setOrganizationName(QStringLiteral("RouteLens"));
@@ -20,6 +29,10 @@ Application::Application(int& argc, char** argv)
 
     smokeTest_ = arguments().contains(QStringLiteral("--smoke-test"));
     applyTheme();
+}
+
+Application::~Application() {
+    WSACleanup();
 }
 
 bool Application::isSmokeTest() const noexcept {

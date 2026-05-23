@@ -93,6 +93,27 @@ QVector<UdpEndpointObservation> UdpFlowAggregator::endpointsFor(const UdpEndpoin
     return result;
 }
 
+QHash<std::uint32_t, std::uint64_t> UdpFlowAggregator::bandwidthBytesByPid(const std::int64_t freshnessMs) const {
+    QHash<std::uint32_t, std::uint64_t> out;
+    QMutexLocker locker(&mutex_);
+    const auto now = QDateTime::currentMSecsSinceEpoch();
+    for (auto it = storage_.cbegin(); it != storage_.cend(); ++it) {
+        const auto pid = it.key().pid;
+        std::uint64_t sum = 0;
+        for (const auto& observation : it.value()) {
+            if (observation.lastSeenMs < now - freshnessMs) {
+                continue;
+            }
+            sum += observation.sentBytes;
+            sum += observation.recvBytes;
+        }
+        if (sum > 0) {
+            out[pid] += sum;
+        }
+    }
+    return out;
+}
+
 void UdpFlowAggregator::pruneOlderThan(const std::int64_t cutoffMs) {
     QMutexLocker locker(&mutex_);
     auto it = storage_.begin();

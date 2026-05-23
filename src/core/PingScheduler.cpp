@@ -27,10 +27,19 @@ void PingScheduler::updateTargets(const QVector<TargetEndpoint>& currentTargets)
         if (target.ip.isEmpty() || target.isPrivate || shouldSkipTarget(target.ip)) {
             continue;
         }
-        keep.insert(target.ip);
-        auto& state = targets_[target.ip];
+        const QString key = makeTargetKey(target.ip, target.localAddress);
+        keep.insert(key);
+        auto& state = targets_[key];
+        state.key = key;
         state.ip = target.ip;
+        state.localAddress = target.localAddress;
         state.portForTcpFallback = target.port;
+        state.preferTcp = target.preferTcp;
+        if (state.preferTcp) {
+            state.icmpBlocked = true;
+        } else {
+            state.icmpBlocked = false;
+        }
     }
     for (auto it = targets_.begin(); it != targets_.end();) {
         if (!keep.contains(it.key())) {
@@ -60,29 +69,29 @@ void PingScheduler::onTick() {
             break;
         }
         auto& state = it.value();
-        if (state.lastProbeMs > 0 && nowMs - state.lastProbeMs < 1000) {
+        if (state.lastProbeMs > 0 && nowMs - state.lastProbeMs < 250) {
             continue;
         }
         state.lastProbeMs = nowMs;
         ++pendingProbes_;
-        if (state.icmpBlocked) {
-            tcpProbe_->enqueue(state.ip, state.portForTcpFallback == 0 ? 443 : state.portForTcpFallback, 1500);
+        if (state.preferTcp || state.icmpBlocked) {
+            tcpProbe_->enqueue(state.key, state.ip, state.localAddress, state.portForTcpFallback == 0 ? 443 : state.portForTcpFallback, 700);
         } else {
-            icmpProbe_->enqueue(state.ip, 1000);
+            icmpProbe_->enqueue(state.key, state.ip, 500);
         }
     }
 }
 
-void PingScheduler::onIcmpResult(const QString& ip, const gpd::platform::PingResult& result) {
+void PingScheduler::onIcmpResult(const QString& targetKey, const gpd::platform::PingResult& result) {
     pendingProbes_ = qMax(0, pendingProbes_ - 1);
     PingSample sample;
     sample.timedOut = result.timedOut;
     sample.rttMs = result.rttMs;
     sample.completedAtMs = result.completedAtMs;
-    aggregator_.recordSample(ip, sample);
-    aggregator_.recordUnreachable(ip, false);
+    aggregator_.recordSample(targetKey, sample);
+    aggregator_.recordUnreachable(targetKey, false);
 
-    auto it = targets_.find(ip);
+    auto it = targets_.find(targetKey);
     if (it == targets_.end()) {
         Q_EMIT aggregatesUpdated();
         return;
@@ -92,7 +101,7 @@ void PingScheduler::onIcmpResult(const QString& ip, const gpd::platform::PingRes
         ++it->consecutiveTimeouts;
         if (it->consecutiveTimeouts >= 5) {
             it->icmpBlocked = true;
-            aggregator_.recordIcmpBlocked(ip);
+            aggregator_.recordIcmpBlocked(targetKey);
         }
     } else {
         it->consecutiveTimeouts = 0;
@@ -100,15 +109,19 @@ void PingScheduler::onIcmpResult(const QString& ip, const gpd::platform::PingRes
     Q_EMIT aggregatesUpdated();
 }
 
-void PingScheduler::onTcpResult(const QString& ip, const gpd::platform::PingResult& result) {
+void PingScheduler::onTcpResult(const QString& targetKey, const gpd::platform::PingResult& result) {
     pendingProbes_ = qMax(0, pendingProbes_ - 1);
     PingSample sample;
     sample.timedOut = result.timedOut;
     sample.rttMs = result.rttMs;
     sample.completedAtMs = result.completedAtMs;
-    aggregator_.recordSample(ip, sample);
-    aggregator_.recordUnreachable(ip, result.timedOut);
+    aggregator_.recordSample(targetKey, sample);
+    aggregator_.recordUnreachable(targetKey, result.timedOut);
     Q_EMIT aggregatesUpdated();
+}
+
+QString PingScheduler::makeTargetKey(const QString& ip, const QString& localAddress) {
+    return QStringLiteral("%1|%2").arg(ip, localAddress);
 }
 
 bool PingScheduler::shouldSkipTarget(const QString& ip) {

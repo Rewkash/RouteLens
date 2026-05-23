@@ -4,7 +4,6 @@
 #include <ws2tcpip.h>
 
 #include <QDateTime>
-#include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QQueue>
@@ -26,7 +25,9 @@ struct SocketGuard {
 };
 
 struct Task {
+    QString key;
     QString ip;
+    QString localBindIp;
     std::uint16_t port{0};
     int timeoutMs{1500};
 };
@@ -72,7 +73,7 @@ protected:
             const QByteArray portUtf8 = QByteArray::number(task.port);
             if (getaddrinfo(ipUtf8.constData(), portUtf8.constData(), &hints, &addr) != 0 || addr == nullptr) {
                 result.errorMessage = QStringLiteral("Invalid TCP target");
-                QMetaObject::invokeMethod(owner_, [owner = owner_, ip = task.ip, result]() { Q_EMIT owner->pingCompleted(ip, result); }, Qt::QueuedConnection);
+                Q_EMIT owner_->pingCompleted(task.key, result);
                 continue;
             }
 
@@ -81,8 +82,29 @@ protected:
             if (sock.socket == INVALID_SOCKET) {
                 freeaddrinfo(addr);
                 result.errorMessage = QStringLiteral("socket() failed");
-                QMetaObject::invokeMethod(owner_, [owner = owner_, ip = task.ip, result]() { Q_EMIT owner->pingCompleted(ip, result); }, Qt::QueuedConnection);
+                Q_EMIT owner_->pingCompleted(task.key, result);
                 continue;
+            }
+
+            if (!task.localBindIp.isEmpty() && task.localBindIp != QStringLiteral("0.0.0.0") && task.localBindIp != QStringLiteral("::")) {
+                addrinfo localHints{};
+                localHints.ai_family = addr->ai_family;
+                localHints.ai_socktype = SOCK_STREAM;
+                localHints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
+                addrinfo* localAddr = nullptr;
+                const QByteArray localIpUtf8 = task.localBindIp.toUtf8();
+                if (getaddrinfo(localIpUtf8.constData(), "0", &localHints, &localAddr) == 0 && localAddr != nullptr) {
+                    const int bindRc = ::bind(sock.socket, localAddr->ai_addr, static_cast<int>(localAddr->ai_addrlen));
+                    if (bindRc != 0) {
+                        const int bindErr = WSAGetLastError();
+                        result.errorMessage = QStringLiteral("bind failed %1").arg(bindErr);
+                        freeaddrinfo(localAddr);
+                        freeaddrinfo(addr);
+                        Q_EMIT owner_->pingCompleted(task.key, result);
+                        continue;
+                    }
+                    freeaddrinfo(localAddr);
+                }
             }
 
             u_long nonBlocking = 1;
@@ -94,7 +116,7 @@ protected:
                 result.timedOut = false;
                 result.rttMs = static_cast<int>(QDateTime::currentMSecsSinceEpoch() - started);
                 result.completedAtMs = QDateTime::currentMSecsSinceEpoch();
-                QMetaObject::invokeMethod(owner_, [owner = owner_, ip = task.ip, result]() { Q_EMIT owner->pingCompleted(ip, result); }, Qt::QueuedConnection);
+                Q_EMIT owner_->pingCompleted(task.key, result);
                 continue;
             }
 
@@ -108,7 +130,7 @@ protected:
             result.completedAtMs = QDateTime::currentMSecsSinceEpoch();
             if (sel <= 0) {
                 result.timedOut = true;
-                QMetaObject::invokeMethod(owner_, [owner = owner_, ip = task.ip, result]() { Q_EMIT owner->pingCompleted(ip, result); }, Qt::QueuedConnection);
+                Q_EMIT owner_->pingCompleted(task.key, result);
                 continue;
             }
 
@@ -122,7 +144,7 @@ protected:
                 result.timedOut = true;
                 result.errorMessage = QStringLiteral("connect failed %1").arg(soError);
             }
-            QMetaObject::invokeMethod(owner_, [owner = owner_, ip = task.ip, result]() { Q_EMIT owner->pingCompleted(ip, result); }, Qt::QueuedConnection);
+            Q_EMIT owner_->pingCompleted(task.key, result);
         }
     }
 
@@ -164,11 +186,15 @@ void TcpPingProbeWin::stop() {
     impl_->worker.reset();
 }
 
-void TcpPingProbeWin::enqueue(const QString& targetIp, const std::uint16_t port, const int timeoutMs) {
+void TcpPingProbeWin::enqueue(const QString& targetKey,
+                              const QString& targetIp,
+                              const QString& localBindIp,
+                              const std::uint16_t port,
+                              const int timeoutMs) {
     if (!impl_->worker || !impl_->worker->isRunning()) {
         return;
     }
-    impl_->worker->enqueue(Task{targetIp, port, timeoutMs});
+    impl_->worker->enqueue(Task{targetKey, targetIp, localBindIp, port, timeoutMs});
 }
 
 } // namespace gpd::platform

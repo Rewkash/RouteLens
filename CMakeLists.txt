@@ -20,6 +20,12 @@ set(GPD_SOURCES
     src/core/ConnectionEnricher.cpp
     src/core/ClashApiClient.cpp
     src/core/ClashConnectionMatcher.cpp
+    src/core/diagnostic/AnchorPingProbe.cpp
+    src/core/diagnostic/BackgroundTrafficProbe.cpp
+    src/core/diagnostic/BufferbloatProbe.cpp
+    src/core/diagnostic/DiagnosticEngine.cpp
+    src/core/diagnostic/DiagnosticRuleEngine.cpp
+    src/core/diagnostic/DiagnosticTypes.cpp
     src/core/InterfaceClassifier.cpp
     src/core/GeoIpResolver.cpp
     src/core/PingAggregator.cpp
@@ -29,6 +35,12 @@ set(GPD_SOURCES
     src/core/TunnelProcessRegistry.cpp
     src/core/UdpFlowAggregator.cpp
     src/platform/windows/ConnectionScannerWin.cpp
+    src/platform/windows/diagnostic/AdapterErrorProbe.cpp
+    src/platform/windows/diagnostic/CpuPressureProbe.cpp
+    src/platform/windows/diagnostic/HopProbe.cpp
+    src/platform/windows/diagnostic/PacketLossProbe.cpp
+    src/platform/windows/diagnostic/VpnRouteProbe.cpp
+    src/platform/windows/diagnostic/WifiMetricsProbe.cpp
     src/platform/windows/EtwNetworkTap.cpp
     src/platform/windows/EtwParser.cpp
     src/platform/windows/InterfaceInspectorWin.cpp
@@ -49,6 +61,13 @@ set(GPD_HEADERS
     src/core/ConnectionEnricher.h
     src/core/ClashApiClient.h
     src/core/ClashConnectionMatcher.h
+    src/core/diagnostic/AnchorPingProbe.h
+    src/core/diagnostic/BackgroundTrafficProbe.h
+    src/core/diagnostic/BufferbloatProbe.h
+    src/core/diagnostic/DiagnosticEngine.h
+    src/core/diagnostic/DiagnosticRuleEngine.h
+    src/core/diagnostic/DiagnosticTypes.h
+    src/core/diagnostic/IDiagnosticProbe.h
     src/core/GeoIpResolver.h
     src/core/InterfaceClassifier.h
     src/core/Models.h
@@ -59,6 +78,12 @@ set(GPD_HEADERS
     src/core/PingScheduler.h
     src/core/UdpFlowAggregator.h
     src/platform/windows/ConnectionScannerWin.h
+    src/platform/windows/diagnostic/AdapterErrorProbe.h
+    src/platform/windows/diagnostic/CpuPressureProbe.h
+    src/platform/windows/diagnostic/HopProbe.h
+    src/platform/windows/diagnostic/PacketLossProbe.h
+    src/platform/windows/diagnostic/VpnRouteProbe.h
+    src/platform/windows/diagnostic/WifiMetricsProbe.h
     src/platform/windows/EtwNetworkTap.h
     src/platform/windows/EtwParser.h
     src/platform/windows/InterfaceInspectorWin.h
@@ -104,6 +129,7 @@ target_link_libraries(RouteLensApp PUBLIC
     iphlpapi
     shell32
     tdh
+    wlanapi
     ws2_32
 )
 
