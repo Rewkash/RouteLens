@@ -46,14 +46,14 @@ bool AnchorPingProbe::start() {
     if (!gatewayIp.isEmpty()) {
         targets.push_back({gatewayIp, QString(), 0, false, false, false, gpd::platform::UdpProbePayload::Auto});
     }
-    targets.push_back({QStringLiteral("1.1.1.1"), QString(), 53, false, false, true, gpd::platform::UdpProbePayload::DnsQuery});
-    targets.push_back({QStringLiteral("8.8.8.8"), QString(), 53, false, false, true, gpd::platform::UdpProbePayload::DnsQuery});
-    targets.push_back({QStringLiteral("9.9.9.9"), QString(), 53, false, false, true, gpd::platform::UdpProbePayload::DnsQuery});
-    targets.push_back({QStringLiteral("1.0.0.1"), QString(), 53, false, false, true, gpd::platform::UdpProbePayload::DnsQuery});
+    targets.push_back({QStringLiteral("1.1.1.1"), QString(), 443, false, true, false, gpd::platform::UdpProbePayload::Auto});
+    targets.push_back({QStringLiteral("8.8.8.8"), QString(), 443, false, true, false, gpd::platform::UdpProbePayload::Auto});
+    targets.push_back({QStringLiteral("9.9.9.9"), QString(), 443, false, true, false, gpd::platform::UdpProbePayload::Auto});
+    targets.push_back({QStringLiteral("1.0.0.1"), QString(), 443, false, true, false, gpd::platform::UdpProbePayload::Auto});
     if (!targetIp_.isEmpty()) {
         targets.push_back({targetIp_, targetLocalAddress_, static_cast<std::uint16_t>(targetPort_), false, false, true,
                            gpd::platform::UdpProbePayload::SourceA2sInfo});
-        targets.push_back({targetIp_, QString(), 1, false, false, true, gpd::platform::UdpProbePayload::ClosedPortProbe});
+        targets.push_back({targetIp_, QString(), 1, false, true, false, gpd::platform::UdpProbePayload::Auto});
     }
     scheduler_->updateAnchorTargets(targets);
     return true;
