@@ -196,8 +196,8 @@ DiagnosticSection DiagnosticRuleEngine::evaluateIsp(const QHash<QString, QVarian
     const auto a11 = nestedMap(anchor, QStringLiteral("anchor_1_1_1_1"));
     const auto a88 = nestedMap(anchor, QStringLiteral("anchor_8_8_8_8"));
     const auto a99 = nestedMap(anchor, QStringLiteral("anchor_9_9_9_9"));
-    const auto aGit = nestedMap(anchor, QStringLiteral("anchor_185_199_108_133"));
-    if (a11.isEmpty() || a88.isEmpty() || a99.isEmpty() || aGit.isEmpty()) {
+    const auto a10 = nestedMap(anchor, QStringLiteral("anchor_1_0_0_1"));
+    if (a11.isEmpty() || a88.isEmpty() || a99.isEmpty() || a10.isEmpty()) {
         section.overallStatus = DiagnosticStatus::Unknown;
         return section;
     }
@@ -220,11 +220,11 @@ DiagnosticSection DiagnosticRuleEngine::evaluateIsp(const QHash<QString, QVarian
                                                     QString::number(mapNumber(a99, QStringLiteral("lossPercent")), 'f', 1)),
                                            DiagnosticStatus::Info));
     section.findings.push_back(makeFinding(section.id,
-                                           QStringLiteral("GitHub 185.199.108.133"),
-                                           QStringLiteral("RTT %1 ms, loss %2%")
-                                               .arg(QString::number(mapNumber(aGit, QStringLiteral("rttMs")), 'f', 1),
-                                                    QString::number(mapNumber(aGit, QStringLiteral("lossPercent")), 'f', 1)),
-                                           DiagnosticStatus::Info));
+                                            QStringLiteral("Cloudflare 1.0.0.1"),
+                                            QStringLiteral("RTT %1 ms, loss %2%")
+                                                .arg(QString::number(mapNumber(a10, QStringLiteral("rttMs")), 'f', 1),
+                                                     QString::number(mapNumber(a10, QStringLiteral("lossPercent")), 'f', 1)),
+                                            DiagnosticStatus::Info));
     if (qAbs(rtt11 - rtt88) > 50.0) {
         section.findings.push_back(makeFinding(section.id, QStringLiteral("RTT якорей сильно различается"),
                                                QStringLiteral("1.1.1.1=%1 ms, 8.8.8.8=%2 ms").arg(QString::number(rtt11, 'f', 1), QString::number(rtt88, 'f', 1)),
@@ -291,10 +291,15 @@ DiagnosticSection DiagnosticRuleEngine::evaluateVpn(const QHash<QString, QVarian
     }
     const double jitterDelta = mapNumber(t, QStringLiteral("jitterMs")) - mapNumber(a, QStringLiteral("jitterMs"));
     const double rttDelta = mapNumber(t, QStringLiteral("rttMs")) - mapNumber(a, QStringLiteral("rttMs"));
-    if (rttDelta > 30.0) {
-        section.findings.push_back(makeFinding(section.id, QStringLiteral("VPN добавляет задержку"),
-                                               QStringLiteral("Delta RTT: +%1 ms").arg(QString::number(rttDelta, 'f', 1)),
-                                               DiagnosticStatus::Info));
+    if (rttDelta > 0.0) {
+        section.findings.push_back(makeFinding(
+            section.id,
+            QStringLiteral("Расстояние до игрового сервера через VPN"),
+            QStringLiteral("Anchor (Cloudflare) %1 ms -> Game server %2 ms (delta +%3 ms)")
+                .arg(QString::number(mapNumber(a, QStringLiteral("rttMs"), -1.0), 'f', 1),
+                     QString::number(mapNumber(t, QStringLiteral("rttMs"), -1.0), 'f', 1),
+                     QString::number(rttDelta, 'f', 1)),
+            DiagnosticStatus::Info));
     }
     if (jitterDelta > 20.0) {
         section.findings.push_back(makeFinding(section.id, QStringLiteral("VPN добавляет джиттер"),
@@ -320,8 +325,9 @@ DiagnosticSection DiagnosticRuleEngine::evaluateGameServer(const QHash<QString, 
     const auto anchor = snapshots.value(QStringLiteral("anchor_ping"));
     const auto lossProbe = snapshots.value(QStringLiteral("packet_loss"));
     const auto t = nestedMap(anchor, QStringLiteral("target"));
+    const auto pathLossMap = nestedMap(anchor, QStringLiteral("target_path_loss"));
     const auto targetLoss = nestedMap(lossProbe, QStringLiteral("target"));
-    if (t.isEmpty() && targetLoss.isEmpty()) {
+    if (t.isEmpty() && targetLoss.isEmpty() && pathLossMap.isEmpty()) {
         section.overallStatus = DiagnosticStatus::Unknown;
         section.findings.push_back(makeFinding(section.id,
                                                QStringLiteral("Потери игрового потока не измерены напрямую"),
@@ -333,8 +339,11 @@ DiagnosticSection DiagnosticRuleEngine::evaluateGameServer(const QHash<QString, 
     if (!t.isEmpty()) {
         const double rtt = mapNumber(t, QStringLiteral("rttMs"), -1.0);
         const double jitter = mapNumber(t, QStringLiteral("jitterMs"));
-        const double loss = mapNumber(t, QStringLiteral("lossPercent"));
-        if (rtt < 0.0) {
+        const double a2sLoss = mapNumber(t, QStringLiteral("lossPercent"));
+        const double pathLossPct = mapNumber(pathLossMap, QStringLiteral("lossPercent"), -1.0);
+        const double pathLossRtt = mapNumber(pathLossMap, QStringLiteral("rttMs"), -1.0);
+        const double effectiveRtt = rtt > 0.0 ? rtt : pathLossRtt;
+        if (effectiveRtt < 0.0) {
             section.findings.push_back(makeFinding(section.id,
                                                    QStringLiteral("RTT сервера недоступен"),
                                                    QStringLiteral("Нет валидных измерений RTT для цели"),
@@ -342,16 +351,19 @@ DiagnosticSection DiagnosticRuleEngine::evaluateGameServer(const QHash<QString, 
                                                    QStringLiteral("Убедитесь, что выбран активный игровой поток с реальным remote IP.")));
         } else {
             DiagnosticStatus rttStatus = DiagnosticStatus::Ok;
-            if (rtt > 100.0) {
+            if (effectiveRtt > 100.0) {
                 rttStatus = DiagnosticStatus::Problem;
-            } else if (rtt > 50.0) {
+            } else if (effectiveRtt > 50.0) {
                 rttStatus = DiagnosticStatus::Warning;
             }
-            section.findings.push_back(makeFinding(section.id, QStringLiteral("RTT сервера"), QStringLiteral("RTT: %1 ms").arg(QString::number(rtt, 'f', 1)), rttStatus));
-            if (ci != nullptr && ci->routedThroughKind == InterfaceKind::VpnTunnel && rtt < 5.0) {
+            section.findings.push_back(makeFinding(section.id,
+                                                   QStringLiteral("RTT сервера"),
+                                                   QStringLiteral("RTT: %1 ms").arg(QString::number(effectiveRtt, 'f', 1)),
+                                                   rttStatus));
+            if (ci != nullptr && ci->routedThroughKind == InterfaceKind::VpnTunnel && effectiveRtt < 5.0) {
                 section.findings.push_back(makeFinding(section.id,
                                                        QStringLiteral("Подозрительный RTT через VPN"),
-                                                       QStringLiteral("RTT %1 ms выглядит неестественно для удаленного сервера").arg(QString::number(rtt, 'f', 1)),
+                                                       QStringLiteral("RTT %1 ms выглядит неестественно для удаленного сервера").arg(QString::number(effectiveRtt, 'f', 1)),
                                                        DiagnosticStatus::Warning,
                                                        QStringLiteral("Дождитесь UDP-пробы/полной диагностики для подтверждения.")));
             }
@@ -359,8 +371,29 @@ DiagnosticSection DiagnosticRuleEngine::evaluateGameServer(const QHash<QString, 
         if (jitter > 30.0) {
             section.findings.push_back(makeFinding(section.id, QStringLiteral("Высокий джиттер"), QStringLiteral("Джиттер: %1 ms").arg(QString::number(jitter, 'f', 1)), DiagnosticStatus::Problem));
         }
-        if (loss > 1.0) {
-            section.findings.push_back(makeFinding(section.id, QStringLiteral("Потери пакетов влияют на игру"), QStringLiteral("Потери: %1%").arg(QString::number(loss, 'f', 1)), DiagnosticStatus::Problem));
+        if (pathLossPct >= 0.0) {
+            const double pathSamples = mapNumber(pathLossMap, QStringLiteral("samples"), 0.0);
+            const DiagnosticStatus lossStatus = pathLossPct > 1.0 ? DiagnosticStatus::Problem : (pathLossPct > 0.3 ? DiagnosticStatus::Warning : DiagnosticStatus::Ok);
+            section.findings.push_back(makeFinding(section.id,
+                                                   QStringLiteral("Реальный path loss до сервера"),
+                                                   QStringLiteral("ICMP Port Unreachable: %1% loss (%2 проб)")
+                                                       .arg(QString::number(pathLossPct, 'f', 1), QString::number(pathSamples, 'f', 0)),
+                                                   lossStatus,
+                                                   pathLossPct > 1.0 ? QStringLiteral("Реальные потери пакетов до игрового сервера.") : QString()));
+        }
+        if (a2sLoss > 30.0 && (pathLossPct < 5.0 || pathLossPct < 0.0)) {
+            section.findings.push_back(makeFinding(section.id,
+                                                   QStringLiteral("A2S query loss выше реального"),
+                                                   QStringLiteral("A2S: %1%, реальный path: %2% — Source 2 сервер выборочно отвечает на A2S")
+                                                       .arg(QString::number(a2sLoss, 'f', 1),
+                                                            pathLossPct < 0.0 ? QStringLiteral("n/a") : QString::number(pathLossPct, 'f', 1)),
+                                                   DiagnosticStatus::Info,
+                                                   QStringLiteral("Loss по A2S может быть завышен; сверяйте с in-game net_graph.")));
+        } else if (a2sLoss > 1.0 && a2sLoss <= 30.0) {
+            section.findings.push_back(makeFinding(section.id,
+                                                   QStringLiteral("A2S loss"),
+                                                   QStringLiteral("Потери A2S: %1%").arg(QString::number(a2sLoss, 'f', 1)),
+                                                   DiagnosticStatus::Problem));
         }
     }
 

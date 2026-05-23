@@ -29,6 +29,7 @@ struct Task {
     QString key;
     QString ip;
     std::uint16_t port{0};
+    UdpProbePayload payloadType{UdpProbePayload::Auto};
     int timeoutMs{1500};
 };
 
@@ -36,11 +37,38 @@ bool isSourcePort(const std::uint16_t port) {
     return (port >= 27000 && port <= 27052) || (port >= 27015 && port <= 27040);
 }
 
-QByteArray buildPayload(const std::uint16_t port, QString& proto) {
-    if (isSourcePort(port)) {
-        proto = QStringLiteral("source_a2s");
-        return QByteArray("\xFF\xFF\xFF\xFFTSource Engine Query\0", 25);
+QByteArray buildSourceA2sInfo(QString& proto) {
+    proto = QStringLiteral("source_a2s");
+    return QByteArray("\xFF\xFF\xFF\xFFTSource Engine Query\0", 25);
+}
+
+QByteArray buildDnsQuery(QString& proto) {
+    proto = QStringLiteral("dns_query");
+    static const unsigned char packet[] = {
+        0x12, 0x34,
+        0x01, 0x00,
+        0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+        0x03, 'c', 'o', 'm',
+        0x00,
+        0x00, 0x01,
+        0x00, 0x01,
+    };
+    return QByteArray(reinterpret_cast<const char*>(packet), static_cast<int>(sizeof(packet)));
+}
+
+QByteArray buildClosedPortProbe(QString& proto) {
+    proto = QStringLiteral("closed_port_probe");
+    QByteArray payload;
+    payload.resize(8);
+    for (int i = 0; i < payload.size(); ++i) {
+        payload[i] = static_cast<char>(QRandomGenerator::global()->generate() & 0xFF);
     }
+    return payload;
+}
+
+QByteArray buildGenericRandom(QString& proto) {
     proto = QStringLiteral("generic_udp");
     QByteArray payload;
     payload.resize(16);
@@ -48,6 +76,27 @@ QByteArray buildPayload(const std::uint16_t port, QString& proto) {
         payload[i] = static_cast<char>(QRandomGenerator::global()->generate() & 0xFF);
     }
     return payload;
+}
+
+QByteArray buildPayload(const Task& task, QString& proto) {
+    switch (task.payloadType) {
+    case UdpProbePayload::SourceA2sInfo:
+        return buildSourceA2sInfo(proto);
+    case UdpProbePayload::DnsQuery:
+        return buildDnsQuery(proto);
+    case UdpProbePayload::ClosedPortProbe:
+        return buildClosedPortProbe(proto);
+    case UdpProbePayload::GenericRandom:
+        return buildGenericRandom(proto);
+    case UdpProbePayload::Auto:
+    default:
+        break;
+    }
+    if (isSourcePort(task.port)) {
+        proto = QStringLiteral("source_a2s");
+        return buildSourceA2sInfo(proto);
+    }
+    return buildGenericRandom(proto);
 }
 
 class Worker final : public QThread {
@@ -109,7 +158,7 @@ protected:
             setsockopt(sock.socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
 
             QString proto;
-            const QByteArray payload = buildPayload(task.port, proto);
+            const QByteArray payload = buildPayload(task, proto);
             result.probeProtocol = proto;
             const int sent = sendto(sock.socket, payload.constData(), payload.size(), 0, addr->ai_addr, static_cast<int>(addr->ai_addrlen));
             if (sent <= 0) {
@@ -186,11 +235,15 @@ void UdpProbeWin::stop() {
     impl_->worker.reset();
 }
 
-void UdpProbeWin::enqueue(const QString& targetKey, const QString& targetIp, const std::uint16_t targetPort, const int timeoutMs) {
+void UdpProbeWin::enqueue(const QString& targetKey,
+                          const QString& targetIp,
+                          const std::uint16_t targetPort,
+                          const UdpProbePayload payloadType,
+                          const int timeoutMs) {
     if (!impl_->worker || !impl_->worker->isRunning()) {
         return;
     }
-    impl_->worker->enqueue(Task{targetKey, targetIp, targetPort, timeoutMs});
+    impl_->worker->enqueue(Task{targetKey, targetIp, targetPort, payloadType, timeoutMs});
 }
 
 } // namespace gpd::platform

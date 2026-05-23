@@ -8,6 +8,8 @@
 
 #include <cstdint>
 
+#include "platform/windows/UdpProbeWin.h"
+
 class QTimer;
 
 namespace gpd::platform {
@@ -27,6 +29,7 @@ struct TargetEndpoint {
     bool isPrivate{false};
     bool preferTcp{false};
     bool preferUdp{false};
+    gpd::platform::UdpProbePayload udpPayload{gpd::platform::UdpProbePayload::Auto};
 };
 
 class PingScheduler final : public QObject {
@@ -55,6 +58,7 @@ private:
         std::uint16_t portForTcpFallback{0};
         bool preferTcp{false};
         bool preferUdp{false};
+        gpd::platform::UdpProbePayload udpPayload{gpd::platform::UdpProbePayload::Auto};
         int consecutiveTimeouts{0};
         bool icmpBlocked{false};
         std::int64_t lastProbeMs{0};
