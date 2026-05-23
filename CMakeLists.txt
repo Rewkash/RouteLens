@@ -46,8 +46,10 @@ set(GPD_SOURCES
     src/platform/windows/InterfaceInspectorWin.cpp
     src/platform/windows/ProcessMonitorWin.cpp
     src/platform/windows/PingProbeWin.cpp
+    src/platform/windows/RouteHelpersWin.cpp
     src/platform/windows/RouteResolverWin.cpp
     src/platform/windows/TcpPingProbeWin.cpp
+    src/platform/windows/UdpProbeWin.cpp
     src/platform/windows/WinapiUtils.cpp
     src/ui/InterfacesPanel.cpp
     src/ui/KindIcon.cpp
@@ -89,8 +91,10 @@ set(GPD_HEADERS
     src/platform/windows/InterfaceInspectorWin.h
     src/platform/windows/ProcessMonitorWin.h
     src/platform/windows/PingProbeWin.h
+    src/platform/windows/RouteHelpersWin.h
     src/platform/windows/RouteResolverWin.h
     src/platform/windows/TcpPingProbeWin.h
+    src/platform/windows/UdpProbeWin.h
     src/platform/windows/WinapiUtils.h
     src/ui/InterfacesPanel.h
     src/ui/KindIcon.h

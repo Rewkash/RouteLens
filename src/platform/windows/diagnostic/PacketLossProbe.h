@@ -27,7 +27,7 @@ Q_SIGNALS:
 private:
     void runNext();
     void parseAndStore(const QString& key, const QString& output);
-    QString detectGatewayForLocalAddress(const QString& localAddress) const;
+    QString detectPhysicalDefaultGateway() const;
 
     QString targetIp_;
     QString localAddress_;

@@ -1,6 +1,7 @@
 #include "core/diagnostic/AnchorPingProbe.h"
 
 #include "core/PingScheduler.h"
+#include "platform/windows/RouteHelpersWin.h"
 
 namespace gpd::core {
 
@@ -40,14 +41,18 @@ bool AnchorPingProbe::start() {
         return false;
     }
     QVector<TargetEndpoint> targets;
-    targets.push_back({QStringLiteral("1.1.1.1"), QString(), 53, false, false});
-    targets.push_back({QStringLiteral("8.8.8.8"), QString(), 53, false, false});
-    targets.push_back({QStringLiteral("9.9.9.9"), QString(), 53, false, false});
-    targets.push_back({QStringLiteral("185.199.108.133"), QString(), 443, false, false});
-    if (!targetIp_.isEmpty()) {
-        targets.push_back({targetIp_, targetLocalAddress_, static_cast<std::uint16_t>(targetPort_), false, false});
+    const QString gatewayIp = gpd::platform::findPhysicalDefaultGateway();
+    if (!gatewayIp.isEmpty()) {
+        targets.push_back({gatewayIp, QString(), 0, false, false, false});
     }
-    scheduler_->updateTargets(targets);
+    targets.push_back({QStringLiteral("1.1.1.1"), QString(), 53, false, false, false});
+    targets.push_back({QStringLiteral("8.8.8.8"), QString(), 53, false, false, false});
+    targets.push_back({QStringLiteral("9.9.9.9"), QString(), 53, false, false, false});
+    targets.push_back({QStringLiteral("185.199.108.133"), QString(), 443, false, false, false});
+    if (!targetIp_.isEmpty()) {
+        targets.push_back({targetIp_, targetLocalAddress_, static_cast<std::uint16_t>(targetPort_), false, false, true});
+    }
+    scheduler_->updateAnchorTargets(targets);
     return true;
 }
 
@@ -64,6 +69,11 @@ QVariantMap AnchorPingProbe::snapshot() const {
     out.insert(QStringLiteral("anchor_8_8_8_8"), toMap(snap.value(keyFor(QStringLiteral("8.8.8.8"), QString()))));
     out.insert(QStringLiteral("anchor_9_9_9_9"), toMap(snap.value(keyFor(QStringLiteral("9.9.9.9"), QString()))));
     out.insert(QStringLiteral("anchor_185_199_108_133"), toMap(snap.value(keyFor(QStringLiteral("185.199.108.133"), QString()))));
+    const QString gatewayIp = gpd::platform::findPhysicalDefaultGateway();
+    if (!gatewayIp.isEmpty()) {
+        out.insert(QStringLiteral("gateway"), toMap(snap.value(keyFor(gatewayIp, QString()))));
+        out.insert(QStringLiteral("gatewayIp"), gatewayIp);
+    }
     if (!targetIp_.isEmpty()) {
         out.insert(QStringLiteral("target"), toMap(snap.value(keyFor(targetIp_, targetLocalAddress_))));
     }

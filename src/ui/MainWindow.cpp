@@ -20,6 +20,7 @@
 #include "platform/windows/ProcessMonitorWin.h"
 #include "platform/windows/RouteResolverWin.h"
 #include "platform/windows/TcpPingProbeWin.h"
+#include "platform/windows/UdpProbeWin.h"
 #include "ui/InterfacesPanel.h"
 #include "ui/KindIcon.h"
 #include "ui/VerdictBadge.h"
@@ -167,7 +168,8 @@ MainWindow::MainWindow(QWidget* parent)
     , geoIp_(std::make_unique<gpd::core::GeoIpResolver>())
     , pingProbe_(std::make_unique<gpd::platform::PingProbeWin>())
     , tcpPingProbe_(std::make_unique<gpd::platform::TcpPingProbeWin>())
-    , pingScheduler_(std::make_unique<gpd::core::PingScheduler>(pingProbe_.get(), tcpPingProbe_.get()))
+    , udpProbe_(std::make_unique<gpd::platform::UdpProbeWin>())
+    , pingScheduler_(std::make_unique<gpd::core::PingScheduler>(pingProbe_.get(), tcpPingProbe_.get(), udpProbe_.get()))
     , tunnelCorrelator_(std::make_unique<gpd::core::TunnelCorrelator>(5000))
     , diagnosticEngine_(std::make_unique<gpd::core::DiagnosticEngine>(pingScheduler_.get(), this)) {
     diagnosticEngine_->setUdpFlowAggregator(udpFlows_.get());
@@ -594,8 +596,14 @@ void MainWindow::refreshConnections() {
         for (auto& connection : result.connections) {
             if (connection.hasPublicRemoteEndpoint) {
                 geoIps.push_back(connection.remoteAddress);
-                const bool preferTcp = connection.routedThroughKind == gpd::core::InterfaceKind::VpnTunnel;
-                targets.push_back({connection.remoteAddress, connection.localAddress, connection.remotePort, connection.isPrivateDestination, preferTcp});
+                const bool isUdpConnection = connection.protocol == gpd::core::TransportProtocol::Udp;
+                const bool preferTcp = !isUdpConnection && connection.routedThroughKind == gpd::core::InterfaceKind::VpnTunnel;
+                targets.push_back({connection.remoteAddress,
+                                   connection.localAddress,
+                                   connection.remotePort,
+                                   connection.isPrivateDestination,
+                                   preferTcp,
+                                   isUdpConnection});
             }
 
             const auto clashMatch = clashMatcher_->findFor(connection);
@@ -782,6 +790,7 @@ void MainWindow::updateMonitoringState() {
         verdictBadge_->setVerdict({gpd::core::RouteVerdict::Unknown, 5, tr("Сканирование соединений активно. Вердикт маршрута появится позже.")});
         pingProbe_->start();
         tcpPingProbe_->start();
+        udpProbe_->start();
         pingScheduler_->start();
         diagnosticEngine_->startContinuous(5000);
         const bool etwStarted = etwTap_->start();
@@ -800,6 +809,7 @@ void MainWindow::updateMonitoringState() {
     diagnosticEngine_->stop();
     pingProbe_->stop();
     tcpPingProbe_->stop();
+    udpProbe_->stop();
     startStopButton_->setText(tr("Запустить мониторинг"));
     verdictBadge_->setVerdict({gpd::core::RouteVerdict::Unknown, 0, tr("Мониторинг остановлен.")});
 }

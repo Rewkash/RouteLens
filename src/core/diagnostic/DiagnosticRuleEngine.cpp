@@ -47,7 +47,7 @@ DiagnosticReport DiagnosticRuleEngine::buildReport(const QString& targetIp,
         evaluateFirstHop(probeSnapshots),
         evaluateIsp(probeSnapshots),
         evaluateVpn(probeSnapshots, connectionInfo),
-        evaluateGameServer(probeSnapshots),
+        evaluateGameServer(probeSnapshots, connectionInfo),
         evaluateBufferbloat(probeSnapshots),
         evaluateBackground(probeSnapshots),
     };
@@ -83,23 +83,27 @@ DiagnosticSection DiagnosticRuleEngine::evaluateLocal(const QHash<QString, QVari
     if (!wifi.isEmpty()) {
         const int rssi = wifi.value(QStringLiteral("rssidBm")).toInt(0);
         const int speed = wifi.value(QStringLiteral("linkSpeedMbps")).toInt(0);
+        const QString ssid = wifi.value(QStringLiteral("ssid")).toString();
+        DiagnosticStatus wifiStatus = DiagnosticStatus::Ok;
+        QString wifiAdvice;
         if (rssi < -80) {
-            section.findings.push_back(makeFinding(section.id, QStringLiteral("Сигнал Wi-Fi очень слабый"),
-                                                   QStringLiteral("RSSI: %1 dBm").arg(rssi),
-                                                   DiagnosticStatus::Problem,
-                                                   QStringLiteral("Подойдите ближе к точке доступа или используйте Ethernet.")));
+            wifiStatus = DiagnosticStatus::Problem;
+            wifiAdvice = QStringLiteral("Подойдите ближе к точке доступа или используйте Ethernet.");
         } else if (rssi < -70) {
-            section.findings.push_back(makeFinding(section.id, QStringLiteral("Сигнал Wi-Fi слабый"),
-                                                   QStringLiteral("RSSI: %1 dBm").arg(rssi),
-                                                   DiagnosticStatus::Warning,
-                                                   QStringLiteral("Сигнал слабый; сократите расстояние до точки доступа.")));
+            wifiStatus = DiagnosticStatus::Warning;
+            wifiAdvice = QStringLiteral("Сигнал слабый; сократите расстояние до точки доступа.");
         }
-        if (speed > 0 && speed < 50) {
-            section.findings.push_back(makeFinding(section.id, QStringLiteral("Низкая скорость Wi-Fi линка"),
-                                                   QStringLiteral("Link speed: %1 Mbps").arg(speed),
-                                                   DiagnosticStatus::Warning,
-                                                   QStringLiteral("Возможны помехи; проверьте загруженность канала.")));
+        if (speed > 0 && speed < 50 && wifiStatus == DiagnosticStatus::Ok) {
+            wifiStatus = DiagnosticStatus::Warning;
+            wifiAdvice = QStringLiteral("Возможны помехи; проверьте загруженность канала.");
         }
+        section.findings.push_back(makeFinding(section.id,
+                                               QStringLiteral("Wi-Fi"),
+                                               QStringLiteral("%1, RSSI %2 dBm, link %3 Mbps").arg(ssid.isEmpty() ? QStringLiteral("(SSID неизвестен)") : ssid).arg(rssi).arg(speed),
+                                               wifiStatus,
+                                               wifiAdvice));
+    } else {
+        section.findings.push_back(makeFinding(section.id, QStringLiteral("Канал доступа"), QStringLiteral("Подключение не через Wi-Fi или метрики Wi-Fi недоступны"), DiagnosticStatus::Info));
     }
 
     const auto adapter = snapshots.value(QStringLiteral("adapter_errors"));
@@ -107,32 +111,32 @@ DiagnosticSection DiagnosticRuleEngine::evaluateLocal(const QHash<QString, QVari
         const double inErr = mapNumber(adapter, QStringLiteral("inErrorsPerSec"));
         const double outErr = mapNumber(adapter, QStringLiteral("outErrorsPerSec"));
         const double total = inErr + outErr;
+        DiagnosticStatus adapterStatus = DiagnosticStatus::Ok;
+        QString advice;
         if (total > 1.0) {
-            section.findings.push_back(makeFinding(section.id, QStringLiteral("Высокий уровень ошибок адаптера"),
-                                                   QStringLiteral("Errors/sec: %1").arg(QString::number(total, 'f', 2)),
-                                                   DiagnosticStatus::Problem,
-                                                   QStringLiteral("Обновите драйвер и проверьте кабель/состояние адаптера.")));
+            adapterStatus = DiagnosticStatus::Problem;
+            advice = QStringLiteral("Обновите драйвер и проверьте кабель/состояние адаптера.");
         } else if (total > 0.1) {
-            section.findings.push_back(makeFinding(section.id, QStringLiteral("У адаптера есть ошибки"),
-                                                   QStringLiteral("Errors/sec: %1").arg(QString::number(total, 'f', 2)),
-                                                   DiagnosticStatus::Warning,
-                                                   QStringLiteral("Проверьте адаптер и попробуйте подключение по Ethernet.")));
+            adapterStatus = DiagnosticStatus::Warning;
+            advice = QStringLiteral("Проверьте адаптер и попробуйте подключение по Ethernet.");
         }
+        section.findings.push_back(makeFinding(section.id,
+                                               QStringLiteral("Сетевой адаптер"),
+                                               QStringLiteral("Ошибок %1/сек").arg(QString::number(total, 'f', 2)),
+                                               adapterStatus,
+                                               advice));
     }
 
     const auto cpu = snapshots.value(QStringLiteral("cpu_pressure"));
     if (!cpu.isEmpty()) {
         const double processCpu = mapNumber(cpu, QStringLiteral("processCpuPercent"));
-        if (processCpu > 90.0) {
-            section.findings.push_back(makeFinding(section.id, QStringLiteral("Игровой процесс упирается в CPU"),
-                                                   QStringLiteral("Process CPU: %1%").arg(QString::number(processCpu, 'f', 1)),
-                                                   DiagnosticStatus::Warning,
-                                                   QStringLiteral("Фризы могут быть связаны с игрой, а не с сетью.")));
-        }
-    }
-
-    if (section.findings.isEmpty()) {
-        section.findings.push_back(makeFinding(section.id, QStringLiteral("Локальные метрики в норме"), QStringLiteral("Проблем не обнаружено"), DiagnosticStatus::Ok));
+        const double systemCpu = mapNumber(cpu, QStringLiteral("systemCpuPercent"));
+        const DiagnosticStatus cpuStatus = (processCpu > 90.0 || systemCpu > 95.0) ? DiagnosticStatus::Warning : DiagnosticStatus::Ok;
+        section.findings.push_back(makeFinding(section.id,
+                                               QStringLiteral("CPU"),
+                                               QStringLiteral("процесс %1%, система %2%").arg(QString::number(processCpu, 'f', 1), QString::number(systemCpu, 'f', 1)),
+                                               cpuStatus,
+                                               cpuStatus == DiagnosticStatus::Warning ? QStringLiteral("Фризы могут быть связаны с CPU-нагрузкой.") : QString()));
     }
     QVector<DiagnosticStatus> statuses;
     for (const auto& f : section.findings) {
@@ -191,7 +195,9 @@ DiagnosticSection DiagnosticRuleEngine::evaluateIsp(const QHash<QString, QVarian
     const auto anchor = snapshots.value(QStringLiteral("anchor_ping"));
     const auto a11 = nestedMap(anchor, QStringLiteral("anchor_1_1_1_1"));
     const auto a88 = nestedMap(anchor, QStringLiteral("anchor_8_8_8_8"));
-    if (a11.isEmpty() || a88.isEmpty()) {
+    const auto a99 = nestedMap(anchor, QStringLiteral("anchor_9_9_9_9"));
+    const auto aGit = nestedMap(anchor, QStringLiteral("anchor_185_199_108_133"));
+    if (a11.isEmpty() || a88.isEmpty() || a99.isEmpty() || aGit.isEmpty()) {
         section.overallStatus = DiagnosticStatus::Unknown;
         return section;
     }
@@ -199,6 +205,26 @@ DiagnosticSection DiagnosticRuleEngine::evaluateIsp(const QHash<QString, QVarian
     const double rtt88 = mapNumber(a88, QStringLiteral("rttMs"));
     const double loss11 = mapNumber(a11, QStringLiteral("lossPercent"));
     const double loss88 = mapNumber(a88, QStringLiteral("lossPercent"));
+    section.findings.push_back(makeFinding(section.id,
+                                           QStringLiteral("Cloudflare 1.1.1.1"),
+                                           QStringLiteral("RTT %1 ms, loss %2%").arg(QString::number(rtt11, 'f', 1), QString::number(loss11, 'f', 1)),
+                                           DiagnosticStatus::Info));
+    section.findings.push_back(makeFinding(section.id,
+                                           QStringLiteral("Google 8.8.8.8"),
+                                           QStringLiteral("RTT %1 ms, loss %2%").arg(QString::number(rtt88, 'f', 1), QString::number(loss88, 'f', 1)),
+                                           DiagnosticStatus::Info));
+    section.findings.push_back(makeFinding(section.id,
+                                           QStringLiteral("Quad9 9.9.9.9"),
+                                           QStringLiteral("RTT %1 ms, loss %2%")
+                                               .arg(QString::number(mapNumber(a99, QStringLiteral("rttMs")), 'f', 1),
+                                                    QString::number(mapNumber(a99, QStringLiteral("lossPercent")), 'f', 1)),
+                                           DiagnosticStatus::Info));
+    section.findings.push_back(makeFinding(section.id,
+                                           QStringLiteral("GitHub 185.199.108.133"),
+                                           QStringLiteral("RTT %1 ms, loss %2%")
+                                               .arg(QString::number(mapNumber(aGit, QStringLiteral("rttMs")), 'f', 1),
+                                                    QString::number(mapNumber(aGit, QStringLiteral("lossPercent")), 'f', 1)),
+                                           DiagnosticStatus::Info));
     if (qAbs(rtt11 - rtt88) > 50.0) {
         section.findings.push_back(makeFinding(section.id, QStringLiteral("RTT якорей сильно различается"),
                                                QStringLiteral("1.1.1.1=%1 ms, 8.8.8.8=%2 ms").arg(QString::number(rtt11, 'f', 1), QString::number(rtt88, 'f', 1)),
@@ -287,7 +313,7 @@ DiagnosticSection DiagnosticRuleEngine::evaluateVpn(const QHash<QString, QVarian
     return section;
 }
 
-DiagnosticSection DiagnosticRuleEngine::evaluateGameServer(const QHash<QString, QVariantMap>& snapshots) const {
+DiagnosticSection DiagnosticRuleEngine::evaluateGameServer(const QHash<QString, QVariantMap>& snapshots, const ConnectionInfo* ci) const {
     DiagnosticSection section;
     section.id = QStringLiteral("game_server");
     section.title = QStringLiteral("Игровой сервер");
@@ -322,6 +348,13 @@ DiagnosticSection DiagnosticRuleEngine::evaluateGameServer(const QHash<QString, 
                 rttStatus = DiagnosticStatus::Warning;
             }
             section.findings.push_back(makeFinding(section.id, QStringLiteral("RTT сервера"), QStringLiteral("RTT: %1 ms").arg(QString::number(rtt, 'f', 1)), rttStatus));
+            if (ci != nullptr && ci->routedThroughKind == InterfaceKind::VpnTunnel && rtt < 5.0) {
+                section.findings.push_back(makeFinding(section.id,
+                                                       QStringLiteral("Подозрительный RTT через VPN"),
+                                                       QStringLiteral("RTT %1 ms выглядит неестественно для удаленного сервера").arg(QString::number(rtt, 'f', 1)),
+                                                       DiagnosticStatus::Warning,
+                                                       QStringLiteral("Дождитесь UDP-пробы/полной диагностики для подтверждения.")));
+            }
         }
         if (jitter > 30.0) {
             section.findings.push_back(makeFinding(section.id, QStringLiteral("Высокий джиттер"), QStringLiteral("Джиттер: %1 ms").arg(QString::number(jitter, 'f', 1)), DiagnosticStatus::Problem));
@@ -394,6 +427,8 @@ DiagnosticSection DiagnosticRuleEngine::evaluateBackground(const QHash<QString, 
         return section;
     }
     const double total = mapNumber(bg, QStringLiteral("totalBackgroundMbps"));
+    const double target = mapNumber(bg, QStringLiteral("targetProcessMbps"));
+    const double tunnel = mapNumber(bg, QStringLiteral("tunnelMbps"));
     const double threshold = mapNumber(bg, QStringLiteral("warningThresholdMbps"), 20.0);
     const auto talkers = bg.value(QStringLiteral("topTalkers")).toList();
     QString topText;
@@ -403,6 +438,8 @@ DiagnosticSection DiagnosticRuleEngine::evaluateBackground(const QHash<QString, 
                       .arg(top.value(QStringLiteral("process")).toString(),
                            QString::number(top.value(QStringLiteral("bandwidthMbps")).toDouble(), 'f', 1));
     }
+    section.findings.push_back(makeFinding(section.id, QStringLiteral("Игровой процесс"), QStringLiteral("%1 Mbps").arg(QString::number(target, 'f', 1)), DiagnosticStatus::Info));
+    section.findings.push_back(makeFinding(section.id, QStringLiteral("Тоннельные процессы"), QStringLiteral("%1 Mbps").arg(QString::number(tunnel, 'f', 1)), DiagnosticStatus::Info));
     if (total > (threshold * 2.0)) {
         section.findings.push_back(makeFinding(section.id, QStringLiteral("Фоновый трафик перегружает канал"),
                                                QStringLiteral("Фон: %1 Mbps.%2").arg(QString::number(total, 'f', 1), topText),

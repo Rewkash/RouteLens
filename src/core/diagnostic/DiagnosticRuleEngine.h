@@ -23,7 +23,7 @@ private:
     [[nodiscard]] DiagnosticSection evaluateFirstHop(const QHash<QString, QVariantMap>& snapshots) const;
     [[nodiscard]] DiagnosticSection evaluateIsp(const QHash<QString, QVariantMap>& snapshots) const;
     [[nodiscard]] DiagnosticSection evaluateVpn(const QHash<QString, QVariantMap>& snapshots, const ConnectionInfo* ci) const;
-    [[nodiscard]] DiagnosticSection evaluateGameServer(const QHash<QString, QVariantMap>& snapshots) const;
+    [[nodiscard]] DiagnosticSection evaluateGameServer(const QHash<QString, QVariantMap>& snapshots, const ConnectionInfo* ci) const;
     [[nodiscard]] DiagnosticSection evaluateBufferbloat(const QHash<QString, QVariantMap>& snapshots) const;
     [[nodiscard]] DiagnosticSection evaluateBackground(const QHash<QString, QVariantMap>& snapshots) const;
 };

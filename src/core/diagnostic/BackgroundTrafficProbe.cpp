@@ -1,6 +1,7 @@
 #include "core/diagnostic/BackgroundTrafficProbe.h"
 
 #include "core/UdpFlowAggregator.h"
+#include "core/TunnelProcessRegistry.h"
 #include "platform/windows/ProcessMonitorWin.h"
 
 #include <algorithm>
@@ -13,6 +14,10 @@ BackgroundTrafficProbe::BackgroundTrafficProbe(const UdpFlowAggregator* udpFlows
 
 void BackgroundTrafficProbe::setTargetPid(const std::uint32_t pid) {
     targetPid_ = pid;
+}
+
+void BackgroundTrafficProbe::setTunnelProcessRegistry(const TunnelProcessRegistry* registry) {
+    tunnelRegistry_ = registry;
 }
 
 QString BackgroundTrafficProbe::probeId() const {
@@ -39,10 +44,21 @@ QVariantMap BackgroundTrafficProbe::snapshot() const {
     QVector<Row> rows;
     double totalBackgroundMbps = 0.0;
     double targetMbps = 0.0;
+    double tunnelMbps = 0.0;
+    QVariantList tunnelProcesses;
     for (auto it = byPid.cbegin(); it != byPid.cend(); ++it) {
         const double mbps = (static_cast<double>(it.value()) * 8.0) / (30.0 * 1000.0 * 1000.0);
+        const QString processName = processNameForPid(it.key());
+        const bool isTunnel = TunnelProcessRegistry::isKnownTunnel(processName);
         if (it.key() == targetPid_) {
             targetMbps += mbps;
+        } else if (isTunnel) {
+            tunnelMbps += mbps;
+            QVariantMap tp;
+            tp.insert(QStringLiteral("process"), processName);
+            tp.insert(QStringLiteral("pid"), static_cast<qulonglong>(it.key()));
+            tp.insert(QStringLiteral("bandwidthMbps"), mbps);
+            tunnelProcesses.push_back(tp);
         } else {
             totalBackgroundMbps += mbps;
             rows.push_back({it.key(), mbps});
@@ -61,6 +77,8 @@ QVariantMap BackgroundTrafficProbe::snapshot() const {
     out.insert(QStringLiteral("topTalkers"), talkers);
     out.insert(QStringLiteral("totalBackgroundMbps"), totalBackgroundMbps);
     out.insert(QStringLiteral("targetProcessMbps"), targetMbps);
+    out.insert(QStringLiteral("tunnelMbps"), tunnelMbps);
+    out.insert(QStringLiteral("tunnelProcesses"), tunnelProcesses);
     out.insert(QStringLiteral("warningThresholdMbps"), 20.0);
     return out;
 }

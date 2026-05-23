@@ -1,4 +1,5 @@
 #include "platform/windows/diagnostic/PacketLossProbe.h"
+#include "platform/windows/RouteHelpersWin.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -78,7 +79,7 @@ PacketLossProbe::PacketLossProbe(QObject* parent)
 void PacketLossProbe::setTarget(const QString& targetIp, const QString& localAddress) {
     targetIp_ = targetIp;
     localAddress_ = localAddress;
-    gatewayIp_ = detectGatewayForLocalAddress(localAddress);
+    gatewayIp_ = detectPhysicalDefaultGateway();
 }
 
 void PacketLossProbe::runTest() {
@@ -140,45 +141,8 @@ void PacketLossProbe::parseAndStore(const QString& key, const QString& output) {
     lastSnapshot_.insert(key, m);
 }
 
-QString PacketLossProbe::detectGatewayForLocalAddress(const QString& localAddress) const {
-    if (localAddress.isEmpty()) {
-        return {};
-    }
-
-    ULONG flags = GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_INCLUDE_ALL_INTERFACES;
-    ULONG family = AF_UNSPEC;
-    ULONG bufferSize = 0;
-    ULONG status = GetAdaptersAddresses(family, flags, nullptr, nullptr, &bufferSize);
-    if (status != ERROR_BUFFER_OVERFLOW || bufferSize == 0) {
-        return {};
-    }
-
-    std::vector<BYTE> buffer(bufferSize);
-    auto* addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buffer.data());
-    status = GetAdaptersAddresses(family, flags, nullptr, addresses, &bufferSize);
-    if (status != NO_ERROR) {
-        return {};
-    }
-
-    for (auto* adapter = addresses; adapter != nullptr; adapter = adapter->Next) {
-        bool localMatch = false;
-        for (auto* unicast = adapter->FirstUnicastAddress; unicast != nullptr; unicast = unicast->Next) {
-            if (sockaddrToIp(unicast->Address.lpSockaddr) == localAddress) {
-                localMatch = true;
-                break;
-            }
-        }
-        if (!localMatch) {
-            continue;
-        }
-        for (auto* gateway = adapter->FirstGatewayAddress; gateway != nullptr; gateway = gateway->Next) {
-            const QString gw = sockaddrToIp(gateway->Address.lpSockaddr);
-            if (!gw.isEmpty() && !gw.contains(QLatin1Char(':'))) {
-                return gw;
-            }
-        }
-    }
-    return {};
+QString PacketLossProbe::detectPhysicalDefaultGateway() const {
+    return gpd::platform::findPhysicalDefaultGateway();
 }
 
 } // namespace gpd::platform

@@ -103,6 +103,7 @@ void DiagnosticEngine::startContinuous(const int probeIntervalMs) {
     wifiProbe_->start();
     cpuProbe_->start();
     bgTrafficProbe_->start();
+    vpnRouteProbe_->start();
     timer_->start();
     collectAndPublish();
 }
@@ -129,6 +130,7 @@ void DiagnosticEngine::stop() {
     wifiProbe_->stop();
     cpuProbe_->stop();
     bgTrafficProbe_->stop();
+    vpnRouteProbe_->stop();
     bufferbloatProbe_->stop();
     hopProbe_->stop();
     lossProbe_->stop();

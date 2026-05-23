@@ -13,7 +13,9 @@ class QTimer;
 namespace gpd::platform {
 class PingProbeWin;
 class TcpPingProbeWin;
+class UdpProbeWin;
 struct PingResult;
+struct UdpProbeResult;
 }
 
 namespace gpd::core {
@@ -24,14 +26,19 @@ struct TargetEndpoint {
     std::uint16_t port{0};
     bool isPrivate{false};
     bool preferTcp{false};
+    bool preferUdp{false};
 };
 
 class PingScheduler final : public QObject {
     Q_OBJECT
 public:
-    PingScheduler(gpd::platform::PingProbeWin* icmpProbe, gpd::platform::TcpPingProbeWin* tcpProbe, QObject* parent = nullptr);
+    PingScheduler(gpd::platform::PingProbeWin* icmpProbe,
+                  gpd::platform::TcpPingProbeWin* tcpProbe,
+                  gpd::platform::UdpProbeWin* udpProbe,
+                  QObject* parent = nullptr);
 
     void updateTargets(const QVector<TargetEndpoint>& currentTargets);
+    void updateAnchorTargets(const QVector<TargetEndpoint>& anchorTargets);
     void start();
     void stop();
 
@@ -47,6 +54,7 @@ private:
         QString localAddress;
         std::uint16_t portForTcpFallback{0};
         bool preferTcp{false};
+        bool preferUdp{false};
         int consecutiveTimeouts{0};
         bool icmpBlocked{false};
         std::int64_t lastProbeMs{0};
@@ -55,14 +63,20 @@ private:
     void onTick();
     void onIcmpResult(const QString& targetKey, const gpd::platform::PingResult& result);
     void onTcpResult(const QString& targetKey, const gpd::platform::PingResult& result);
+    void onUdpResult(const QString& targetKey, const gpd::platform::UdpProbeResult& result);
     static bool shouldSkipTarget(const QString& ip);
     static QString makeTargetKey(const QString& ip, const QString& localAddress);
+    void updateTargetMap(QHash<QString, TargetState>& map, const QVector<TargetEndpoint>& endpoints);
+    void scheduleForMap(QHash<QString, TargetState>& map, std::int64_t nowMs);
+    TargetState* findTargetState(const QString& targetKey);
 
     QTimer* tickTimer_{nullptr};
     QHash<QString, TargetState> targets_;
+    QHash<QString, TargetState> anchorTargets_;
     PingAggregator aggregator_;
     gpd::platform::PingProbeWin* icmpProbe_{nullptr};
     gpd::platform::TcpPingProbeWin* tcpProbe_{nullptr};
+    gpd::platform::UdpProbeWin* udpProbe_{nullptr};
     int pendingProbes_{0};
 };
 

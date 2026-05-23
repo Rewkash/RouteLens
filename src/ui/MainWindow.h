@@ -44,6 +44,7 @@ struct TargetEndpoint;
 namespace gpd::platform {
 class PingProbeWin;
 class TcpPingProbeWin;
+class UdpProbeWin;
 }
 
 namespace gpd::ui {
@@ -115,6 +116,7 @@ private:
     std::unique_ptr<gpd::core::GeoIpResolver> geoIp_;
     std::unique_ptr<gpd::platform::PingProbeWin> pingProbe_;
     std::unique_ptr<gpd::platform::TcpPingProbeWin> tcpPingProbe_;
+    std::unique_ptr<gpd::platform::UdpProbeWin> udpProbe_;
     std::unique_ptr<gpd::core::PingScheduler> pingScheduler_;
     std::unique_ptr<gpd::core::TunnelCorrelator> tunnelCorrelator_;
     std::unique_ptr<gpd::core::DiagnosticEngine> diagnosticEngine_;
