@@ -61,6 +61,7 @@
 #include <QtConcurrent>
 
 #include <cstdint>
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -82,6 +83,27 @@ constexpr double kUdpBaseRttFactor = 4.0;
 constexpr double kUdpQueueDelayFactor = 3.5;
 constexpr double kUdpJitterAmplification = 4.0;
 constexpr double kVpnTunnelRttFactor = 2.2;
+
+bool isNoisySystemProcessName(const QString& processName) {
+    const QString n = processName.toLower();
+    static const QSet<QString> blocked = {
+        QStringLiteral("svchost.exe"),
+        QStringLiteral("services.exe"),
+        QStringLiteral("lsass.exe"),
+        QStringLiteral("csrss.exe"),
+        QStringLiteral("smss.exe"),
+        QStringLiteral("wininit.exe"),
+        QStringLiteral("fontdrvhost.exe"),
+        QStringLiteral("dwm.exe"),
+        QStringLiteral("system"),
+        QStringLiteral("registry"),
+        QStringLiteral("sihost.exe"),
+        QStringLiteral("taskhostw.exe"),
+        QStringLiteral("wudfhost.exe"),
+        QStringLiteral("searchindexer.exe"),
+    };
+    return blocked.contains(n);
+}
 
 QStringList runningProcessNamesLower() {
     QProcess process;
@@ -524,16 +546,71 @@ void MainWindow::refreshProcesses() {
     const auto activeCounts = connectionScanner_->activePidConnectionCounts();
     const auto currentPid = processCombo_->currentData().toUInt();
 
-    processCombo_->blockSignals(true);
-    processCombo_->clear();
+    struct GroupedProcessEntry {
+        QString displayName;
+        QString normalizedName;
+        std::uint32_t representativePid{0};
+        int representativeCount{0};
+        int totalConnections{0};
+        int instances{0};
+    };
+
+    QHash<QString, GroupedProcessEntry> grouped;
     for (const auto& process : processes) {
         const int count = activeCounts.value(process.pid, 0);
-        if (count <= 0) {
+        if (count <= 0 || process.name.isEmpty()) {
             continue;
         }
-        processCombo_->addItem(
-            QStringLiteral("%1 (%2) - %3").arg(process.name).arg(process.pid).arg(tr("соединений: %1").arg(count)),
-            QVariant::fromValue(process.pid));
+        if (isNoisySystemProcessName(process.name)) {
+            continue;
+        }
+
+        const QString normalized = process.name.toLower();
+        auto it = grouped.find(normalized);
+        if (it == grouped.end()) {
+            GroupedProcessEntry e;
+            e.displayName = process.name;
+            e.normalizedName = normalized;
+            e.representativePid = process.pid;
+            e.representativeCount = count;
+            e.totalConnections = count;
+            e.instances = 1;
+            grouped.insert(normalized, e);
+            continue;
+        }
+
+        it->totalConnections += count;
+        it->instances += 1;
+        if (count > it->representativeCount) {
+            it->representativeCount = count;
+            it->representativePid = process.pid;
+            it->displayName = process.name;
+        }
+    }
+
+    QVector<GroupedProcessEntry> entries;
+    entries.reserve(grouped.size());
+    for (auto it = grouped.cbegin(); it != grouped.cend(); ++it) {
+        entries.push_back(it.value());
+    }
+    std::sort(entries.begin(), entries.end(), [](const GroupedProcessEntry& lhs, const GroupedProcessEntry& rhs) {
+        if (lhs.totalConnections == rhs.totalConnections) {
+            return lhs.displayName.compare(rhs.displayName, Qt::CaseInsensitive) < 0;
+        }
+        return lhs.totalConnections > rhs.totalConnections;
+    });
+
+    processCombo_->blockSignals(true);
+    processCombo_->clear();
+    for (const auto& entry : entries) {
+        QString title = QStringLiteral("%1 (%2) - %3")
+                            .arg(entry.displayName)
+                            .arg(entry.representativePid)
+                            .arg(tr("соединений: %1").arg(entry.totalConnections));
+        if (entry.instances > 1) {
+            title += QStringLiteral(" • %1").arg(tr("экземпляров: %1").arg(entry.instances));
+        }
+        processCombo_->addItem(title, QVariant::fromValue(entry.representativePid));
     }
 
     int indexToSelect = -1;

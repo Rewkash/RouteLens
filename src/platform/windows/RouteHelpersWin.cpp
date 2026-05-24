@@ -7,6 +7,8 @@
 #include <iphlpapi.h>
 #include <netioapi.h>
 
+#include <QStringList>
+
 #include <vector>
 
 namespace {
