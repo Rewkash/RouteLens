@@ -4,6 +4,7 @@
 #include "core/diagnostic/AnchorPingProbe.h"
 #include "core/diagnostic/BackgroundTrafficProbe.h"
 #include "core/diagnostic/BufferbloatProbe.h"
+#include "core/diagnostic/TunnelLoadProbe.h"
 #include "core/UdpFlowAggregator.h"
 #include "platform/windows/diagnostic/AdapterErrorProbe.h"
 #include "platform/windows/diagnostic/CpuPressureProbe.h"
@@ -29,6 +30,7 @@ DiagnosticEngine::DiagnosticEngine(PingScheduler* pingScheduler, QObject* parent
     , wifiProbe_(std::make_unique<gpd::platform::WifiMetricsProbe>())
     , cpuProbe_(std::make_unique<gpd::platform::CpuPressureProbe>())
     , vpnRouteProbe_(std::make_unique<gpd::platform::VpnRouteProbe>())
+    , tunnelLoadProbe_(std::make_unique<TunnelLoadProbe>())
     , timer_(new QTimer(this)) {
     timer_->setInterval(5000);
     connect(timer_, &QTimer::timeout, this, &DiagnosticEngine::collectAndPublish);
@@ -104,6 +106,7 @@ void DiagnosticEngine::startContinuous(const int probeIntervalMs) {
     cpuProbe_->start();
     bgTrafficProbe_->start();
     vpnRouteProbe_->start();
+    tunnelLoadProbe_->start();
     timer_->start();
     collectAndPublish();
 }
@@ -131,6 +134,7 @@ void DiagnosticEngine::stop() {
     cpuProbe_->stop();
     bgTrafficProbe_->stop();
     vpnRouteProbe_->stop();
+    tunnelLoadProbe_->stop();
     bufferbloatProbe_->stop();
     hopProbe_->stop();
     lossProbe_->stop();
@@ -148,6 +152,7 @@ void DiagnosticEngine::collectAndPublish() {
     snapshots_.insert(cpuProbe_->probeId(), cpuProbe_->snapshot());
     snapshots_.insert(bgTrafficProbe_->probeId(), bgTrafficProbe_->snapshot());
     snapshots_.insert(vpnRouteProbe_->probeId(), vpnRouteProbe_->snapshot());
+    snapshots_.insert(tunnelLoadProbe_->probeId(), tunnelLoadProbe_->snapshot());
 
     const auto report = ruleEngine_.buildReport(targetIp_,
                                                 targetPort_,

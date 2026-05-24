@@ -37,7 +37,8 @@ public:
                  const QString& targetIp,
                  std::uint16_t targetPort,
                  UdpProbePayload payloadType = UdpProbePayload::Auto,
-                 int timeoutMs = 1500);
+                 int timeoutMs = 1500,
+                 const QString& localBindAddress = QString());
 
 Q_SIGNALS:
     void pingCompleted(QString targetKey, gpd::platform::UdpProbeResult result);

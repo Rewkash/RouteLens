@@ -31,6 +31,7 @@ struct Task {
     std::uint16_t port{0};
     UdpProbePayload payloadType{UdpProbePayload::Auto};
     int timeoutMs{1500};
+    QString localBindAddress;
 };
 
 bool isSourcePort(const std::uint16_t port) {
@@ -163,6 +164,16 @@ protected:
                 continue;
             }
 
+            if (!task.localBindAddress.isEmpty() && addr->ai_family == AF_INET) {
+                SOCKADDR_IN bindAddr{};
+                bindAddr.sin_family = AF_INET;
+                bindAddr.sin_port = 0;
+                const QByteArray localUtf8 = task.localBindAddress.toUtf8();
+                if (InetPtonA(AF_INET, localUtf8.constData(), &bindAddr.sin_addr) == 1) {
+                    ::bind(sock.socket, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr));
+                }
+            }
+
             const int timeout = qBound(300, task.timeoutMs, 3000);
             setsockopt(sock.socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
 
@@ -248,11 +259,12 @@ void UdpProbeWin::enqueue(const QString& targetKey,
                           const QString& targetIp,
                           const std::uint16_t targetPort,
                           const UdpProbePayload payloadType,
-                          const int timeoutMs) {
+                          const int timeoutMs,
+                          const QString& localBindAddress) {
     if (!impl_->worker || !impl_->worker->isRunning()) {
         return;
     }
-    impl_->worker->enqueue(Task{targetKey, targetIp, targetPort, payloadType, timeoutMs});
+    impl_->worker->enqueue(Task{targetKey, targetIp, targetPort, payloadType, timeoutMs, localBindAddress});
 }
 
 } // namespace gpd::platform

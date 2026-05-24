@@ -26,6 +26,7 @@ set(GPD_SOURCES
     src/core/diagnostic/DiagnosticEngine.cpp
     src/core/diagnostic/DiagnosticRuleEngine.cpp
     src/core/diagnostic/DiagnosticTypes.cpp
+    src/core/diagnostic/TunnelLoadProbe.cpp
     src/core/InterfaceClassifier.cpp
     src/core/GeoIpResolver.cpp
     src/core/PingAggregator.cpp
@@ -69,6 +70,7 @@ set(GPD_HEADERS
     src/core/diagnostic/DiagnosticEngine.h
     src/core/diagnostic/DiagnosticRuleEngine.h
     src/core/diagnostic/DiagnosticTypes.h
+    src/core/diagnostic/TunnelLoadProbe.h
     src/core/diagnostic/IDiagnosticProbe.h
     src/core/GeoIpResolver.h
     src/core/InterfaceClassifier.h
