@@ -145,6 +145,20 @@ QString connectionRowKey(const gpd::core::ConnectionInfo& c) {
         .arg(c.localPort);
 }
 
+bool isDisplayableConnection(const gpd::core::ConnectionInfo& c) {
+    if (!c.hasRemoteEndpoint) {
+        return false;
+    }
+    const QString remote = c.remoteAddress.trimmed();
+    if (remote.isEmpty() || remote == QStringLiteral("-")) {
+        return false;
+    }
+    if (remote.startsWith(QLatin1Char('('))) {
+        return false;
+    }
+    return true;
+}
+
 QStringList runningProcessNamesLower() {
     QProcess process;
     process.start(QStringLiteral("tasklist"), {QStringLiteral("/FO"), QStringLiteral("CSV"), QStringLiteral("/NH")});
@@ -801,9 +815,17 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
         state.lastUpdateMs = nowMs;
     }
 
-    connectionTable_->setRowCount(result.connections.size());
-    for (int row = 0; row < result.connections.size(); ++row) {
-        fillConnectionRow(row, result.connections[row]);
+    QVector<const gpd::core::ConnectionInfo*> displayedConnections;
+    displayedConnections.reserve(result.connections.size());
+    for (const auto& c : result.connections) {
+        if (isDisplayableConnection(c)) {
+            displayedConnections.push_back(&c);
+        }
+    }
+
+    connectionTable_->setRowCount(displayedConnections.size());
+    for (int row = 0; row < displayedConnections.size(); ++row) {
+        fillConnectionRow(row, *displayedConnections[row]);
     }
     connectionTable_->setSortingEnabled(true);
     connectionTable_->sortItems(sortColumn_, sortOrder_);
