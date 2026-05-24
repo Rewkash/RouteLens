@@ -16,6 +16,7 @@ public:
         QVector<QString> chains;
         QString rule;
         QString rulePayload;
+        QString host;
         QString clashId;
     };
 

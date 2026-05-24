@@ -50,6 +50,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QScrollBar>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTimer>
@@ -174,6 +175,16 @@ QString detectLikelyOwnerProcess(const gpd::core::NetworkInterfaceInfo& info) {
         }
     }
     return {};
+}
+
+QString connectionStableKey(const gpd::core::ConnectionInfo& connection) {
+    return QStringLiteral("%1|%2|%3|%4|%5|%6")
+        .arg(connection.pid)
+        .arg(connection.localAddress)
+        .arg(connection.localPort)
+        .arg(connection.remoteAddress)
+        .arg(connection.remotePort)
+        .arg(connection.protocol == gpd::core::TransportProtocol::Tcp ? QStringLiteral("tcp") : QStringLiteral("udp"));
 }
 }
 
@@ -688,6 +699,7 @@ void MainWindow::refreshConnections() {
                 connection.clashTracked = true;
                 connection.clashOutbound = clashMatch->outboundName;
                 connection.clashRule = clashMatch->rule;
+                connection.siteHint = clashMatch->host;
                 connection.clashChains = clashMatch->chains;
                 if (connection.clashOutbound.compare(QStringLiteral("DIRECT"), Qt::CaseInsensitive) == 0) {
                     connection.proxyStatus = QStringLiteral("Без прокси");
@@ -756,13 +768,32 @@ void MainWindow::refreshConnections() {
 }
 
 void MainWindow::applyRefreshResult(const RefreshResult& result) {
-    lastConnections_ = result.connections;
+    QString selectedKey;
+    const int selectedRow = connectionTable_->currentRow();
+    if (selectedRow >= 0) {
+        auto* selectedItem = connectionTable_->item(selectedRow, 0);
+        if (selectedItem != nullptr) {
+            selectedKey = selectedItem->data(Qt::UserRole).toString();
+        }
+    }
+
+    QVector<gpd::core::ConnectionInfo> visibleConnections;
+    visibleConnections.reserve(result.connections.size());
+    for (const auto& connection : result.connections) {
+        const bool hideInferredUdpPlaceholders = connection.protocol == gpd::core::TransportProtocol::Udp && connection.isInferred;
+        if (hideInferredUdpPlaceholders) {
+            continue;
+        }
+        visibleConnections.push_back(connection);
+    }
+
+    lastConnections_ = visibleConnections;
     qInfo() << "RouteLens refresh pid" << result.selectedPid << "raw" << result.rawConnectionCount << "enriched" << result.connections.size()
             << "etw" << result.etwRunning;
     connectionTable_->setSortingEnabled(false);
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    for (const auto& connection : result.connections) {
+    for (const auto& connection : visibleConnections) {
         if (connection.protocol != gpd::core::TransportProtocol::Udp || !connection.observedFromEtw || !connection.hasPublicRemoteEndpoint) {
             continue;
         }
@@ -796,17 +827,35 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
         state.lastUpdateMs = nowMs;
     }
 
-    connectionTable_->setRowCount(result.connections.size());
-    for (int row = 0; row < result.connections.size(); ++row) {
-        fillConnectionRow(row, result.connections[row]);
+    connectionTable_->setRowCount(visibleConnections.size());
+    for (int row = 0; row < visibleConnections.size(); ++row) {
+        fillConnectionRow(row, visibleConnections[row]);
     }
     connectionTable_->setSortingEnabled(true);
     connectionTable_->sortItems(sortColumn_, sortOrder_);
 
+    if (!selectedKey.isEmpty()) {
+        const int oldScrollValue = connectionTable_->verticalScrollBar() != nullptr ? connectionTable_->verticalScrollBar()->value() : 0;
+        for (int row = 0; row < connectionTable_->rowCount(); ++row) {
+            auto* item = connectionTable_->item(row, 0);
+            if (item != nullptr && item->data(Qt::UserRole).toString() == selectedKey) {
+                if (connectionTable_->currentRow() != row) {
+                    connectionTable_->blockSignals(true);
+                    connectionTable_->setCurrentCell(row, 0, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+                    connectionTable_->blockSignals(false);
+                }
+                if (connectionTable_->verticalScrollBar() != nullptr) {
+                    connectionTable_->verticalScrollBar()->setValue(oldScrollValue);
+                }
+                break;
+            }
+        }
+    }
+
     verdictBadge_->setVerdict(result.verdict);
     interfacesPanel_->setInterfaces(result.interfaces);
 
-    if (!result.connections.isEmpty()) {
+    if (!visibleConnections.isEmpty()) {
         const gpd::core::ConnectionInfo* selected = nullptr;
         const auto isUsableRemote = [](const gpd::core::ConnectionInfo& c) {
             if (!c.hasRemoteEndpoint || c.remotePort == 0 || c.remoteAddress.startsWith(QLatin1Char('('))) {
@@ -819,20 +868,20 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
             return true;
         };
 
-        for (const auto& c : result.connections) {
+        for (const auto& c : visibleConnections) {
             if (isUsableRemote(c) && c.hasPublicRemoteEndpoint) {
                 selected = &c;
                 break;
             }
         }
-        for (const auto& c : result.connections) {
+        for (const auto& c : visibleConnections) {
             if (selected == nullptr && isUsableRemote(c)) {
                 selected = &c;
                 break;
             }
         }
         if (selected == nullptr) {
-            selected = &result.connections.first();
+            selected = &visibleConnections.first();
         }
         diagnosticEngine_->setTarget(selected->remoteAddress, selected->remotePort, processCombo_->currentText(), selected->localAddress);
         diagnosticEngine_->setConnectionContext(*selected);
@@ -926,10 +975,17 @@ void MainWindow::routeToTunnelCorrelator(const QVector<gpd::core::UdpFlowEvent>&
 void MainWindow::fillConnectionRow(const int row, const gpd::core::ConnectionInfo& connection) {
     const auto setItem = [&](const int column, const QString& text) {
         auto* item = makeQtOwned<QTableWidgetItem>(text);
+        if (column == 0) {
+            item->setData(Qt::UserRole, connectionStableKey(connection));
+        }
         connectionTable_->setItem(row, column, item);
     };
 
-    setItem(0, connection.remoteAddress);
+    if (!connection.siteHint.isEmpty()) {
+        setItem(0, QStringLiteral("%1 (%2)").arg(connection.siteHint, connection.remoteAddress));
+    } else {
+        setItem(0, connection.remoteAddress);
+    }
     setItem(1, connection.remotePort == 0 ? QStringLiteral("-") : QString::number(connection.remotePort));
     setItem(2, gpd::core::protocolToString(connection.protocol));
     QString countryText = QStringLiteral("-");
