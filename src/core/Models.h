@@ -70,6 +70,7 @@ struct ConnectionInfo {
     bool clashTracked{false};
     QString clashOutbound;
     QString clashRule;
+    QString siteHint;
     QVector<QString> clashChains;
     QString perRowVerdict;
     bool observedFromEtw{false};

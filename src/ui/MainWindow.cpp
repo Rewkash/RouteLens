@@ -33,7 +33,6 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
-#include <QItemSelectionModel>
 #include <QLabel>
 #include <QMenuBar>
 #include <QDebug>
@@ -42,7 +41,6 @@
 #include <QPushButton>
 #include <QProgressBar>
 #include <QRegularExpression>
-#include <QScrollBar>
 #include <QSettings>
 #include <QSet>
 #include <QUrl>
@@ -52,6 +50,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QScrollBar>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTimer>
@@ -63,6 +62,7 @@
 #include <QtConcurrent>
 
 #include <cstdint>
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -85,78 +85,25 @@ constexpr double kUdpQueueDelayFactor = 3.5;
 constexpr double kUdpJitterAmplification = 4.0;
 constexpr double kVpnTunnelRttFactor = 2.2;
 
-QString normalizeProcessName(const QString& rawName) {
-    QString n = rawName.trimmed().toLower();
-    const int slash = qMax(n.lastIndexOf(QLatin1Char('/')), n.lastIndexOf(QLatin1Char('\\')));
-    if (slash >= 0 && slash + 1 < n.size()) {
-        n = n.mid(slash + 1);
-    }
-    if (n.endsWith(QStringLiteral(".exe"))) {
-        n.chop(4);
-    }
-    return n;
-}
-
-bool isLikelyNoiseProcess(const QString& rawName) {
-    static const QSet<QString> noise = {
-        // Windows system / service host
-        QStringLiteral("system"), QStringLiteral("registry"), QStringLiteral("smss"),
-        QStringLiteral("csrss"), QStringLiteral("wininit"), QStringLiteral("services"),
-        QStringLiteral("lsass"), QStringLiteral("lsm"), QStringLiteral("winlogon"),
-        QStringLiteral("fontdrvhost"), QStringLiteral("dwm"), QStringLiteral("svchost"),
-        QStringLiteral("spoolsv"), QStringLiteral("searchindexer"), QStringLiteral("searchhost"),
-        QStringLiteral("searchprotocolhost"), QStringLiteral("searchfilterhost"),
-        QStringLiteral("runtimebroker"), QStringLiteral("shellexperiencehost"),
-        QStringLiteral("startmenuexperiencehost"), QStringLiteral("applicationframehost"),
-        QStringLiteral("taskhostw"), QStringLiteral("audiodg"), QStringLiteral("conhost"),
-        QStringLiteral("explorer"), QStringLiteral("ctfmon"), QStringLiteral("sihost"),
-        QStringLiteral("rundll32"), QStringLiteral("dllhost"), QStringLiteral("wmiprvse"),
-        QStringLiteral("wuauclt"), QStringLiteral("trustedinstaller"), QStringLiteral("tiworker"),
-        QStringLiteral("musnotifyicon"), QStringLiteral("musnotification"),
-        QStringLiteral("backgroundtaskhost"), QStringLiteral("useroobebroker"),
-        QStringLiteral("ngc"), QStringLiteral("wsappx"), QStringLiteral("winstore.app"),
-        // Microsoft Defender / SmartScreen / OneDrive
-        QStringLiteral("msmpeng"), QStringLiteral("nissrv"), QStringLiteral("smartscreen"),
-        QStringLiteral("securityhealthservice"), QStringLiteral("securityhealthsystray"),
-        QStringLiteral("onedrive"), QStringLiteral("onedrivesetup"),
-        // Microsoft Edge runtime (webview / system component)
-        QStringLiteral("msedge"), QStringLiteral("msedgewebview2"),
-        // Browsers (обычно не нужны для диагностики игры)
-        QStringLiteral("chrome"), QStringLiteral("firefox"), QStringLiteral("opera"),
-        QStringLiteral("opera_gx"), QStringLiteral("brave"), QStringLiteral("vivaldi"),
-        QStringLiteral("yandex"), QStringLiteral("iexplore"), QStringLiteral("browser"),
-        // Updaters / telemetry
-        QStringLiteral("googleupdate"), QStringLiteral("googlecrashhandler"),
-        QStringLiteral("googlecrashhandler64"), QStringLiteral("yandexupdate"),
-        QStringLiteral("operaupdater"), QStringLiteral("edgeupdate"), QStringLiteral("edgeupdater"),
-        QStringLiteral("compattelrunner"), QStringLiteral("telemetry"),
-        QStringLiteral("updateagent"),
+bool isNoisySystemProcessName(const QString& processName) {
+    const QString n = processName.toLower();
+    static const QSet<QString> blocked = {
+        QStringLiteral("svchost.exe"),
+        QStringLiteral("services.exe"),
+        QStringLiteral("lsass.exe"),
+        QStringLiteral("csrss.exe"),
+        QStringLiteral("smss.exe"),
+        QStringLiteral("wininit.exe"),
+        QStringLiteral("fontdrvhost.exe"),
+        QStringLiteral("dwm.exe"),
+        QStringLiteral("system"),
+        QStringLiteral("registry"),
+        QStringLiteral("sihost.exe"),
+        QStringLiteral("taskhostw.exe"),
+        QStringLiteral("wudfhost.exe"),
+        QStringLiteral("searchindexer.exe"),
     };
-    return noise.contains(normalizeProcessName(rawName));
-}
-
-QString connectionRowKey(const gpd::core::ConnectionInfo& c) {
-    return QStringLiteral("%1|%2|%3|%4|%5|%6")
-        .arg(static_cast<int>(c.protocol))
-        .arg(c.pid)
-        .arg(c.remoteAddress)
-        .arg(c.remotePort)
-        .arg(c.localAddress)
-        .arg(c.localPort);
-}
-
-bool isDisplayableConnection(const gpd::core::ConnectionInfo& c) {
-    if (!c.hasRemoteEndpoint) {
-        return false;
-    }
-    const QString remote = c.remoteAddress.trimmed();
-    if (remote.isEmpty() || remote == QStringLiteral("-")) {
-        return false;
-    }
-    if (remote.startsWith(QLatin1Char('('))) {
-        return false;
-    }
-    return true;
+    return blocked.contains(n);
 }
 
 QStringList runningProcessNamesLower() {
@@ -228,6 +175,16 @@ QString detectLikelyOwnerProcess(const gpd::core::NetworkInterfaceInfo& info) {
         }
     }
     return {};
+}
+
+QString connectionStableKey(const gpd::core::ConnectionInfo& connection) {
+    return QStringLiteral("%1|%2|%3|%4|%5|%6")
+        .arg(connection.pid)
+        .arg(connection.localAddress)
+        .arg(connection.localPort)
+        .arg(connection.remoteAddress)
+        .arg(connection.remotePort)
+        .arg(connection.protocol == gpd::core::TransportProtocol::Tcp ? QStringLiteral("tcp") : QStringLiteral("udp"));
 }
 }
 
@@ -600,22 +557,71 @@ void MainWindow::refreshProcesses() {
     const auto activeCounts = connectionScanner_->activePidConnectionCounts();
     const auto currentPid = processCombo_->currentData().toUInt();
 
-    processCombo_->blockSignals(true);
-    processCombo_->clear();
+    struct GroupedProcessEntry {
+        QString displayName;
+        QString normalizedName;
+        std::uint32_t representativePid{0};
+        int representativeCount{0};
+        int totalConnections{0};
+        int instances{0};
+    };
+
+    QHash<QString, GroupedProcessEntry> grouped;
     for (const auto& process : processes) {
         const int count = activeCounts.value(process.pid, 0);
-        if (count <= 0) {
+        if (count <= 0 || process.name.isEmpty()) {
             continue;
         }
-        if (isLikelyNoiseProcess(process.name)) {
+        if (isNoisySystemProcessName(process.name)) {
             continue;
         }
-        if (gpd::core::TunnelProcessRegistry::isKnownTunnel(process.name)) {
+
+        const QString normalized = process.name.toLower();
+        auto it = grouped.find(normalized);
+        if (it == grouped.end()) {
+            GroupedProcessEntry e;
+            e.displayName = process.name;
+            e.normalizedName = normalized;
+            e.representativePid = process.pid;
+            e.representativeCount = count;
+            e.totalConnections = count;
+            e.instances = 1;
+            grouped.insert(normalized, e);
             continue;
         }
-        processCombo_->addItem(
-            QStringLiteral("%1 (%2) - %3").arg(process.name).arg(process.pid).arg(tr("соединений: %1").arg(count)),
-            QVariant::fromValue(process.pid));
+
+        it->totalConnections += count;
+        it->instances += 1;
+        if (count > it->representativeCount) {
+            it->representativeCount = count;
+            it->representativePid = process.pid;
+            it->displayName = process.name;
+        }
+    }
+
+    QVector<GroupedProcessEntry> entries;
+    entries.reserve(grouped.size());
+    for (auto it = grouped.cbegin(); it != grouped.cend(); ++it) {
+        entries.push_back(it.value());
+    }
+    std::sort(entries.begin(), entries.end(), [](const GroupedProcessEntry& lhs, const GroupedProcessEntry& rhs) {
+        if (lhs.totalConnections == rhs.totalConnections) {
+            return lhs.displayName.compare(rhs.displayName, Qt::CaseInsensitive) < 0;
+        }
+        return lhs.totalConnections > rhs.totalConnections;
+    });
+
+    processCombo_->blockSignals(true);
+    processCombo_->clear();
+    for (const auto& entry : entries) {
+        QString title = QStringLiteral("%1 (%2) - %3")
+                            .arg(entry.displayName)
+                            .arg(entry.representativePid)
+                            .arg(tr("соединений: %1").arg(entry.totalConnections));
+        if (entry.instances > 1) {
+            title += QStringLiteral(" • %1").arg(tr("экземпляров: %1").arg(entry.instances));
+        }
+        processCombo_->addItem(title, QVariant::fromValue(entry.representativePid));
     }
 
     int indexToSelect = -1;
@@ -693,6 +699,7 @@ void MainWindow::refreshConnections() {
                 connection.clashTracked = true;
                 connection.clashOutbound = clashMatch->outboundName;
                 connection.clashRule = clashMatch->rule;
+                connection.siteHint = clashMatch->host;
                 connection.clashChains = clashMatch->chains;
                 if (connection.clashOutbound.compare(QStringLiteral("DIRECT"), Qt::CaseInsensitive) == 0) {
                     connection.proxyStatus = QStringLiteral("Без прокси");
@@ -761,27 +768,32 @@ void MainWindow::refreshConnections() {
 }
 
 void MainWindow::applyRefreshResult(const RefreshResult& result) {
-    lastConnections_ = result.connections;
-    qInfo() << "RouteLens refresh pid" << result.selectedPid << "raw" << result.rawConnectionCount << "enriched" << result.connections.size()
-            << "etw" << result.etwRunning;
-
-    QString savedSelectionKey;
-    if (auto* sel = connectionTable_->selectionModel(); sel != nullptr) {
-        const auto rows = sel->selectedRows();
-        if (!rows.isEmpty()) {
-            if (auto* item = connectionTable_->item(rows.first().row(), 0); item != nullptr) {
-                savedSelectionKey = item->data(Qt::UserRole).toString();
-            }
+    QString selectedKey;
+    const int selectedRow = connectionTable_->currentRow();
+    if (selectedRow >= 0) {
+        auto* selectedItem = connectionTable_->item(selectedRow, 0);
+        if (selectedItem != nullptr) {
+            selectedKey = selectedItem->data(Qt::UserRole).toString();
         }
     }
-    const int savedScrollValue = connectionTable_->verticalScrollBar() != nullptr
-        ? connectionTable_->verticalScrollBar()->value()
-        : 0;
 
+    QVector<gpd::core::ConnectionInfo> visibleConnections;
+    visibleConnections.reserve(result.connections.size());
+    for (const auto& connection : result.connections) {
+        const bool hideInferredUdpPlaceholders = connection.protocol == gpd::core::TransportProtocol::Udp && connection.isInferred;
+        if (hideInferredUdpPlaceholders) {
+            continue;
+        }
+        visibleConnections.push_back(connection);
+    }
+
+    lastConnections_ = visibleConnections;
+    qInfo() << "RouteLens refresh pid" << result.selectedPid << "raw" << result.rawConnectionCount << "enriched" << result.connections.size()
+            << "etw" << result.etwRunning;
     connectionTable_->setSortingEnabled(false);
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    for (const auto& connection : result.connections) {
+    for (const auto& connection : visibleConnections) {
         if (connection.protocol != gpd::core::TransportProtocol::Udp || !connection.observedFromEtw || !connection.hasPublicRemoteEndpoint) {
             continue;
         }
@@ -815,45 +827,35 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
         state.lastUpdateMs = nowMs;
     }
 
-    QVector<const gpd::core::ConnectionInfo*> displayedConnections;
-    displayedConnections.reserve(result.connections.size());
-    for (const auto& c : result.connections) {
-        if (isDisplayableConnection(c)) {
-            displayedConnections.push_back(&c);
-        }
-    }
-
-    connectionTable_->setRowCount(displayedConnections.size());
-    for (int row = 0; row < displayedConnections.size(); ++row) {
-        fillConnectionRow(row, *displayedConnections[row]);
+    connectionTable_->setRowCount(visibleConnections.size());
+    for (int row = 0; row < visibleConnections.size(); ++row) {
+        fillConnectionRow(row, visibleConnections[row]);
     }
     connectionTable_->setSortingEnabled(true);
     connectionTable_->sortItems(sortColumn_, sortOrder_);
 
-    if (!savedSelectionKey.isEmpty()) {
-        int matchedRow = -1;
-        for (int r = 0; r < connectionTable_->rowCount(); ++r) {
-            auto* item = connectionTable_->item(r, 0);
-            if (item != nullptr && item->data(Qt::UserRole).toString() == savedSelectionKey) {
-                matchedRow = r;
+    if (!selectedKey.isEmpty()) {
+        const int oldScrollValue = connectionTable_->verticalScrollBar() != nullptr ? connectionTable_->verticalScrollBar()->value() : 0;
+        for (int row = 0; row < connectionTable_->rowCount(); ++row) {
+            auto* item = connectionTable_->item(row, 0);
+            if (item != nullptr && item->data(Qt::UserRole).toString() == selectedKey) {
+                if (connectionTable_->currentRow() != row) {
+                    connectionTable_->blockSignals(true);
+                    connectionTable_->setCurrentCell(row, 0, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+                    connectionTable_->blockSignals(false);
+                }
+                if (connectionTable_->verticalScrollBar() != nullptr) {
+                    connectionTable_->verticalScrollBar()->setValue(oldScrollValue);
+                }
                 break;
             }
         }
-        if (matchedRow >= 0) {
-            connectionTable_->setCurrentCell(matchedRow, 0,
-                QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-        } else {
-            connectionTable_->clearSelection();
-        }
-    }
-    if (connectionTable_->verticalScrollBar() != nullptr) {
-        connectionTable_->verticalScrollBar()->setValue(savedScrollValue);
     }
 
     verdictBadge_->setVerdict(result.verdict);
     interfacesPanel_->setInterfaces(result.interfaces);
 
-    if (!result.connections.isEmpty()) {
+    if (!visibleConnections.isEmpty()) {
         const gpd::core::ConnectionInfo* selected = nullptr;
         const auto isUsableRemote = [](const gpd::core::ConnectionInfo& c) {
             if (!c.hasRemoteEndpoint || c.remotePort == 0 || c.remoteAddress.startsWith(QLatin1Char('('))) {
@@ -866,20 +868,20 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
             return true;
         };
 
-        for (const auto& c : result.connections) {
+        for (const auto& c : visibleConnections) {
             if (isUsableRemote(c) && c.hasPublicRemoteEndpoint) {
                 selected = &c;
                 break;
             }
         }
-        for (const auto& c : result.connections) {
+        for (const auto& c : visibleConnections) {
             if (selected == nullptr && isUsableRemote(c)) {
                 selected = &c;
                 break;
             }
         }
         if (selected == nullptr) {
-            selected = &result.connections.first();
+            selected = &visibleConnections.first();
         }
         diagnosticEngine_->setTarget(selected->remoteAddress, selected->remotePort, processCombo_->currentText(), selected->localAddress);
         diagnosticEngine_->setConnectionContext(*selected);
@@ -973,12 +975,16 @@ void MainWindow::routeToTunnelCorrelator(const QVector<gpd::core::UdpFlowEvent>&
 void MainWindow::fillConnectionRow(const int row, const gpd::core::ConnectionInfo& connection) {
     const auto setItem = [&](const int column, const QString& text) {
         auto* item = makeQtOwned<QTableWidgetItem>(text);
+        if (column == 0) {
+            item->setData(Qt::UserRole, connectionStableKey(connection));
+        }
         connectionTable_->setItem(row, column, item);
     };
 
-    setItem(0, connection.remoteAddress);
-    if (auto* keyItem = connectionTable_->item(row, 0); keyItem != nullptr) {
-        keyItem->setData(Qt::UserRole, connectionRowKey(connection));
+    if (!connection.siteHint.isEmpty()) {
+        setItem(0, QStringLiteral("%1 (%2)").arg(connection.siteHint, connection.remoteAddress));
+    } else {
+        setItem(0, connection.remoteAddress);
     }
     setItem(1, connection.remotePort == 0 ? QStringLiteral("-") : QString::number(connection.remotePort));
     setItem(2, gpd::core::protocolToString(connection.protocol));

@@ -42,6 +42,7 @@ std::optional<ClashConnectionMatcher::Match> ClashConnectionMatcher::findFor(con
     out.chains = byDest->chains;
     out.rule = byDest->rule;
     out.rulePayload = byDest->rulePayload;
+    out.host = byDest->host;
     out.clashId = byDest->id;
     return out;
 }
