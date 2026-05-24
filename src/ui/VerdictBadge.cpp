@@ -5,15 +5,17 @@ namespace gpd::core {
 QString routeVerdictToString(const RouteVerdict verdict) {
     switch (verdict) {
     case RouteVerdict::Direct:
-        return QStringLiteral("DIRECT");
+        return QStringLiteral("Напрямую");
     case RouteVerdict::Vpn:
-        return QStringLiteral("VPN");
+        return QStringLiteral("Через прокси (подтверждено)");
     case RouteVerdict::SplitTunnel:
-        return QStringLiteral("SPLIT");
+        return QStringLiteral("Split-tunnel");
+    case RouteVerdict::TunneledSuspected:
+        return QStringLiteral("Туннелируется (предположительно)");
     case RouteVerdict::Unknown:
-        return QStringLiteral("UNKNOWN");
+        return QStringLiteral("Неизвестно");
     }
-    return QStringLiteral("UNKNOWN");
+    return QStringLiteral("Неизвестно");
 }
 
 QString protocolToString(const TransportProtocol protocol) {
@@ -33,19 +35,19 @@ QString interfaceKindToString(const InterfaceKind kind) {
     case InterfaceKind::Ethernet:
         return QStringLiteral("Ethernet");
     case InterfaceKind::WiFi:
-        return QStringLiteral("WiFi");
+        return QStringLiteral("Wi-Fi");
     case InterfaceKind::Cellular:
-        return QStringLiteral("Cellular");
+        return QStringLiteral("Сотовая сеть");
     case InterfaceKind::VpnTunnel:
-        return QStringLiteral("VPN Tunnel");
+        return QStringLiteral("VPN-туннель");
     case InterfaceKind::VirtualOverlay:
-        return QStringLiteral("Virtual Overlay");
+        return QStringLiteral("Виртуальный оверлей");
     case InterfaceKind::VirtualOther:
-        return QStringLiteral("Virtual Other");
+        return QStringLiteral("Другое виртуальное");
     case InterfaceKind::Unknown:
-        return QStringLiteral("Unknown");
+        return QStringLiteral("Неизвестно");
     }
-    return QStringLiteral("Unknown");
+    return QStringLiteral("Неизвестно");
 }
 
 } // namespace gpd::core
@@ -65,9 +67,11 @@ void VerdictBadge::setVerdict(const gpd::core::VerdictSummary& summary) {
         case gpd::core::RouteVerdict::Direct:
             return QStringLiteral("#2f9e44");
         case gpd::core::RouteVerdict::Vpn:
-            return QStringLiteral("#f08c00");
+            return QStringLiteral("#1c7ed6");
         case gpd::core::RouteVerdict::SplitTunnel:
-            return QStringLiteral("#c92a2a");
+            return QStringLiteral("#f08c00");
+        case gpd::core::RouteVerdict::TunneledSuspected:
+            return QStringLiteral("#e67700");
         case gpd::core::RouteVerdict::Unknown:
             return QStringLiteral("#495057");
         }

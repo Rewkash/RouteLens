@@ -1,7 +1,12 @@
 #include "core/InterfaceClassifier.h"
 #include "core/ConnectionEnricher.h"
+#include "core/GeoIpResolver.h"
+#include "core/PingAggregator.h"
 #include "core/RouteClassifier.h"
+#include "core/TunnelCorrelator.h"
+#include "core/TunnelProcessRegistry.h"
 #include "core/UdpFlowAggregator.h"
+#include "core/diagnostic/DiagnosticRuleEngine.h"
 #include "platform/windows/ConnectionScannerWin.h"
 #include "platform/windows/EtwNetworkTap.h"
 #include "platform/windows/InterfaceInspectorWin.h"
@@ -119,7 +124,8 @@ int runEtwProbe(QCoreApplication& app, const int seconds) {
     QTimer trafficTimer;
     QObject::connect(&trafficTimer, &QTimer::timeout, &app, [&]() {
         const QByteArray payload("routelens-etw-probe");
-        udp.writeDatagram(payload, QHostAddress(QStringLiteral("1.1.1.1")), 53);
+        const auto sent = udp.writeDatagram(payload, QHostAddress(QStringLiteral("1.1.1.1")), 53);
+        Q_UNUSED(sent)
     });
     trafficTimer.start(200);
     QTimer::singleShot(seconds * 1000, &app, [&]() {
@@ -165,7 +171,10 @@ int main(int argc, char** argv) {
         connections.push_back(makeConnection(InterfaceKind::VpnTunnel, QStringLiteral("nekobox-tun"), QStringLiteral("8.8.8.8")));
         connections.push_back(makeConnection(InterfaceKind::VpnTunnel, QStringLiteral("nekobox-tun"), QStringLiteral("1.1.1.1")));
         connections.push_back(makeConnection(InterfaceKind::VpnTunnel, QStringLiteral("nekobox-tun"), QStringLiteral("9.9.9.9")));
-        const auto verdict = RouteClassifier::classify(connections);
+        gpd::core::TunnelCorrelator correlator(2000);
+        correlator.registerTunnelProcess(111, QStringLiteral("nekobox"));
+        correlator.recordFlow(111, 5, InterfaceKind::Ethernet, 1200, true, 1000, QStringLiteral("9.9.9.9"));
+        const auto verdict = RouteClassifier::classify(connections, correlator, 2000);
         expectTrue(verdict.verdict == RouteVerdict::Vpn);
         expectTrue(verdict.confidencePercent >= 70);
     }
@@ -175,7 +184,10 @@ int main(int argc, char** argv) {
         connections.push_back(makeConnection(InterfaceKind::Ethernet, QStringLiteral("Ethernet"), QStringLiteral("8.8.8.8")));
         connections.push_back(makeConnection(InterfaceKind::VpnTunnel, QStringLiteral("nekobox-tun"), QStringLiteral("1.1.1.1")));
         connections.push_back(makeConnection(InterfaceKind::Ethernet, QStringLiteral("Ethernet"), QStringLiteral("9.9.9.9")));
-        const auto verdict = RouteClassifier::classify(connections);
+        gpd::core::TunnelCorrelator correlator(2000);
+        correlator.registerTunnelProcess(111, QStringLiteral("nekobox"));
+        correlator.recordFlow(111, 5, InterfaceKind::Ethernet, 1200, true, 1000, QStringLiteral("9.9.9.9"));
+        const auto verdict = RouteClassifier::classify(connections, correlator, 2000);
         expectTrue(verdict.verdict == RouteVerdict::SplitTunnel);
     }
 
@@ -183,8 +195,83 @@ int main(int argc, char** argv) {
         QVector<gpd::core::ConnectionInfo> connections;
         connections.push_back(makeConnection(InterfaceKind::Ethernet, QStringLiteral("Ethernet"), QStringLiteral("192.168.1.25")));
         connections.push_back(makeConnection(InterfaceKind::Ethernet, QStringLiteral("Ethernet"), QStringLiteral("10.0.0.55")));
-        const auto verdict = RouteClassifier::classify(connections);
+        gpd::core::TunnelCorrelator correlator(2000);
+        const auto verdict = RouteClassifier::classify(connections, correlator, 2000);
         expectTrue(verdict.verdict == RouteVerdict::Unknown);
+    }
+
+    {
+        expectTrue(gpd::core::TunnelProcessRegistry::isKnownTunnel(QStringLiteral("Nekobox.exe")));
+        expectTrue(gpd::core::TunnelProcessRegistry::isKnownTunnel(QStringLiteral("sing-box")));
+        expectTrue(!gpd::core::TunnelProcessRegistry::isKnownTunnel(QStringLiteral("steam.exe")));
+    }
+
+    {
+        gpd::core::TunnelCorrelator correlator(2000);
+        correlator.registerTunnelProcess(123, QStringLiteral("nekobox"));
+        correlator.recordFlow(123, 5, InterfaceKind::Ethernet, 1000, true, 1000, QStringLiteral("8.8.8.8"));
+        expectTrue(correlator.hasActiveTunnel(2000) == QStringLiteral("nekobox"));
+        correlator.prune(3500);
+        expectTrue(correlator.hasActiveTunnel(4000).isEmpty());
+    }
+
+    {
+        gpd::core::PingAggregator ping;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now});
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now + 1000});
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now + 2000});
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now + 3000});
+        ping.recordSample(QStringLiteral("1.1.1.1"), {false, 20, now + 4000});
+        const auto agg = ping.aggregateFor(QStringLiteral("1.1.1.1"));
+        expectTrue(agg.rttAvgMs == 20);
+        expectTrue(agg.rttMinMs == 20);
+        expectTrue(agg.rttMaxMs == 20);
+        expectTrue(agg.lossPercent == 0.0);
+    }
+
+    {
+        gpd::core::PingAggregator ping;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        ping.recordSample(QStringLiteral("8.8.8.8"), {false, 20, now});
+        ping.recordSample(QStringLiteral("8.8.8.8"), {false, 50, now + 1000});
+        ping.recordSample(QStringLiteral("8.8.8.8"), {false, 20, now + 2000});
+        ping.recordSample(QStringLiteral("8.8.8.8"), {true, -1, now + 3000});
+        ping.recordSample(QStringLiteral("8.8.8.8"), {true, -1, now + 4000});
+        const auto agg = ping.aggregateFor(QStringLiteral("8.8.8.8"));
+        expectTrue(agg.lossPercent >= 39.9 && agg.lossPercent <= 40.1);
+        expectTrue(agg.jitterMs > 0.0);
+    }
+
+    {
+        gpd::core::GeoIpResolver geo;
+        geo.setOnlineFallbackEnabled(false);
+        expectTrue(!geo.isReady());
+        const auto info = geo.lookup(QStringLiteral("8.8.8.8"));
+        expectTrue(!info.resolved);
+    }
+
+    {
+        gpd::core::DiagnosticRuleEngine rules;
+        QHash<QString, QVariantMap> snapshots;
+        QVariantMap wifi;
+        wifi.insert(QStringLiteral("rssidBm"), -85);
+        QVariantMap adapter;
+        adapter.insert(QStringLiteral("inErrorsPerSec"), 5.0);
+        adapter.insert(QStringLiteral("outErrorsPerSec"), 0.0);
+        snapshots.insert(QStringLiteral("wifi_metrics"), wifi);
+        snapshots.insert(QStringLiteral("adapter_errors"), adapter);
+        const auto report = rules.buildReport(QStringLiteral("155.133.220.111"), 27015, QStringLiteral("cs2.exe"), snapshots);
+        expectTrue(!report.sections.isEmpty());
+        expectTrue(report.overallStatus == gpd::core::DiagnosticStatus::Problem || report.overallStatus == gpd::core::DiagnosticStatus::Severe);
+    }
+
+    {
+        expectTrue(gpd::core::DiagnosticRuleEngine::combineStatuses({gpd::core::DiagnosticStatus::Ok, gpd::core::DiagnosticStatus::Warning}) ==
+                   gpd::core::DiagnosticStatus::Warning);
+        expectTrue(gpd::core::DiagnosticRuleEngine::combineStatuses({gpd::core::DiagnosticStatus::Problem, gpd::core::DiagnosticStatus::Problem}) ==
+                   gpd::core::DiagnosticStatus::Severe);
+        expectTrue(gpd::core::DiagnosticRuleEngine::combineStatuses({gpd::core::DiagnosticStatus::Severe}) == gpd::core::DiagnosticStatus::Severe);
     }
 
     {

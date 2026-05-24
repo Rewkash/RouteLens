@@ -1,5 +1,7 @@
 #include "core/RouteClassifier.h"
 
+#include "core/TunnelCorrelator.h"
+
 #include <QHostAddress>
 #include <QMap>
 
@@ -46,13 +48,14 @@ bool RouteClassifier::isPrivateAddress(const QString& ipAddress) {
     return false;
 }
 
-VerdictSummary RouteClassifier::classify(const QVector<ConnectionInfo>& connections) {
+VerdictSummary RouteClassifier::classify(const QVector<ConnectionInfo>& connections, const TunnelCorrelator& correlator, const std::int64_t nowMs) {
     int totalPublic = 0;
-    int vpnCount = 0;
+    int proxiedConfirmedCount = 0;
+    int suspectedCount = 0;
     int directCount = 0;
-    int overlayCount = 0;
-    QString firstVpnInterface;
-    QMap<InterfaceKind, int> byKind;
+    int unknownCount = 0;
+    int clashTrackedCount = 0;
+    QMap<QString, int> tunnelByProcess;
 
     for (const auto& connection : connections) {
         if (connection.protocol == TransportProtocol::Udp && connection.isInferred) {
@@ -65,21 +68,47 @@ VerdictSummary RouteClassifier::classify(const QVector<ConnectionInfo>& connecti
             continue;
         }
         ++totalPublic;
-        byKind[connection.routedThroughKind] += 1;
-        if (connection.routedThroughKind == InterfaceKind::VpnTunnel) {
-            ++vpnCount;
-            if (firstVpnInterface.isEmpty()) {
-                firstVpnInterface = connection.routedThroughInterfaceName;
+
+        if (connection.clashTracked) {
+            ++clashTrackedCount;
+            const QString outbound = connection.clashOutbound.toLower();
+            if (outbound == QStringLiteral("direct")) {
+                ++directCount;
+                continue;
             }
-        } else if (connection.routedThroughKind == InterfaceKind::Ethernet || connection.routedThroughKind == InterfaceKind::WiFi ||
-                   connection.routedThroughKind == InterfaceKind::Cellular) {
-            ++directCount;
-        } else if (connection.routedThroughKind == InterfaceKind::VirtualOverlay) {
-            ++overlayCount;
+            if (outbound == QStringLiteral("reject")) {
+                continue;
+            }
+            ++proxiedConfirmedCount;
+            if (!connection.clashOutbound.isEmpty()) {
+                tunnelByProcess[connection.clashOutbound] += 1;
+            }
+            continue;
         }
+
+        if (connection.routedThroughKind == InterfaceKind::Ethernet || connection.routedThroughKind == InterfaceKind::WiFi ||
+            connection.routedThroughKind == InterfaceKind::Cellular) {
+            ++directCount;
+            continue;
+        }
+
+        if (connection.routedThroughKind == InterfaceKind::VpnTunnel || connection.routedThroughKind == InterfaceKind::VirtualOverlay) {
+            const QString tunnelProcess = correlator.hasActiveTunnel(nowMs);
+            if (!tunnelProcess.isEmpty()) {
+                ++proxiedConfirmedCount;
+                tunnelByProcess[tunnelProcess] += 1;
+            } else {
+                ++suspectedCount;
+            }
+            continue;
+        }
+
+        ++unknownCount;
     }
 
     VerdictSummary summary;
+    summary.clashTrackedCount = clashTrackedCount;
+    summary.clashApiAvailable = clashTrackedCount > 0;
     if (totalPublic == 0) {
         summary.verdict = RouteVerdict::Unknown;
         summary.confidencePercent = 0;
@@ -95,10 +124,24 @@ VerdictSummary RouteClassifier::classify(const QVector<ConnectionInfo>& connecti
         return summary;
     }
 
-    if (vpnCount == totalPublic) {
+    QString topProcess;
+    int topCount = 0;
+    for (auto it = tunnelByProcess.cbegin(); it != tunnelByProcess.cend(); ++it) {
+        if (it.value() > topCount) {
+            topCount = it.value();
+            topProcess = it.key();
+        }
+    }
+
+    if (proxiedConfirmedCount == totalPublic) {
         summary.verdict = RouteVerdict::Vpn;
         summary.confidencePercent = qMin(95, 50 + 10 * qMin(totalPublic, 5));
-        summary.reason = QStringLiteral("%1/%1 game endpoints routed via VPN tunnel: %2").arg(totalPublic).arg(firstVpnInterface);
+        summary.tunnelProcessName = topProcess;
+        summary.reason = QStringLiteral("All %1 endpoints proxied via %2").arg(totalPublic).arg(topProcess.isEmpty() ? QStringLiteral("tunnel process") : topProcess);
+        if (clashTrackedCount > 0) {
+            summary.reason += QStringLiteral(" (Clash API tracked %1/%2)").arg(clashTrackedCount).arg(totalPublic);
+            summary.confidencePercent = qMax(summary.confidencePercent, 95);
+        }
         return summary;
     }
 
@@ -106,26 +149,43 @@ VerdictSummary RouteClassifier::classify(const QVector<ConnectionInfo>& connecti
         summary.verdict = RouteVerdict::Direct;
         summary.confidencePercent = qMin(95, 50 + 10 * qMin(totalPublic, 5));
         summary.reason = QStringLiteral("%1/%1 game endpoints routed via physical interfaces").arg(totalPublic);
+        if (clashTrackedCount > 0) {
+            summary.reason += QStringLiteral(" (Clash API tracked %1/%2)").arg(clashTrackedCount).arg(totalPublic);
+            summary.confidencePercent = qMax(summary.confidencePercent, 95);
+        }
         return summary;
     }
 
-    if (vpnCount > 0 && directCount > 0) {
+    if (suspectedCount == totalPublic) {
+        summary.verdict = RouteVerdict::TunneledSuspected;
+        summary.confidencePercent = 50;
+        summary.reason = QStringLiteral("Traffic uses tunnel interfaces, but no active tunnel-process traffic was observed in last 2s");
+        return summary;
+    }
+
+    if (directCount > 0 && (proxiedConfirmedCount + suspectedCount) > 0) {
         summary.verdict = RouteVerdict::SplitTunnel;
-        const int divergence = qMin(vpnCount, directCount);
+        const int divergence = qMin(directCount, proxiedConfirmedCount + suspectedCount);
         summary.confidencePercent = qMin(90, 40 + 10 * qMin(divergence, 5));
-        summary.reason = QStringLiteral("Split routing detected: %1 via VPN and %2 direct").arg(vpnCount).arg(directCount);
+        summary.reason = QStringLiteral("Split routing: %1 proxied (confirmed), %2 direct, %3 tunneled (suspected)")
+                             .arg(proxiedConfirmedCount)
+                             .arg(directCount)
+                             .arg(suspectedCount);
+        summary.tunnelProcessName = topProcess;
         return summary;
     }
 
-    if (overlayCount == totalPublic && vpnCount == 0) {
+    if (proxiedConfirmedCount > 0 && suspectedCount > 0 && directCount == 0) {
         summary.verdict = RouteVerdict::Vpn;
-        summary.confidencePercent = 70;
-        summary.reason = QStringLiteral("overlay network detected");
+        summary.confidencePercent = 72;
+        summary.tunnelProcessName = topProcess;
+        summary.reason = QStringLiteral("Tunnel usage partially confirmed by %1; some endpoints currently only suspected")
+                             .arg(topProcess.isEmpty() ? QStringLiteral("active tunnel process") : topProcess);
         return summary;
     }
 
     summary.verdict = RouteVerdict::Unknown;
-    summary.confidencePercent = 40;
+    summary.confidencePercent = unknownCount > 0 ? 40 : 25;
     summary.reason = QStringLiteral("Insufficient route attribution confidence");
     return summary;
 }

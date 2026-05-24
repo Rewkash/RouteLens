@@ -159,7 +159,7 @@ void EtwNetworkTap::runTraceLoop() {
                                 &kKernelNetworkProviderGuid,
                                 EVENT_CONTROL_CODE_ENABLE_PROVIDER,
                                 TRACE_LEVEL_INFORMATION,
-                                0x30ULL,
+                                0xF0ULL,
                                 0,
                                 0,
                                 nullptr);

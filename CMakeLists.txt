@@ -10,6 +10,7 @@ option(GPD_BUILD_TESTS "Build smoke tests" ON)
 option(GPD_DEPLOY_QT "Run windeployqt after building the GUI executable" ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Network Charts Concurrent)
+find_package(maxminddb CONFIG QUIET)
 
 qt_standard_project_setup()
 
@@ -17,15 +18,38 @@ set(GPD_SOURCES
     src/app/Application.cpp
     src/app/Logger.cpp
     src/core/ConnectionEnricher.cpp
+    src/core/ClashApiClient.cpp
+    src/core/ClashConnectionMatcher.cpp
+    src/core/diagnostic/AnchorPingProbe.cpp
+    src/core/diagnostic/BackgroundTrafficProbe.cpp
+    src/core/diagnostic/BufferbloatProbe.cpp
+    src/core/diagnostic/DiagnosticEngine.cpp
+    src/core/diagnostic/DiagnosticRuleEngine.cpp
+    src/core/diagnostic/DiagnosticTypes.cpp
     src/core/InterfaceClassifier.cpp
+    src/core/GeoIpResolver.cpp
+    src/core/PingAggregator.cpp
+    src/core/PingScheduler.cpp
     src/core/RouteClassifier.cpp
+    src/core/TunnelCorrelator.cpp
+    src/core/TunnelProcessRegistry.cpp
     src/core/UdpFlowAggregator.cpp
     src/platform/windows/ConnectionScannerWin.cpp
+    src/platform/windows/diagnostic/AdapterErrorProbe.cpp
+    src/platform/windows/diagnostic/CpuPressureProbe.cpp
+    src/platform/windows/diagnostic/HopProbe.cpp
+    src/platform/windows/diagnostic/PacketLossProbe.cpp
+    src/platform/windows/diagnostic/VpnRouteProbe.cpp
+    src/platform/windows/diagnostic/WifiMetricsProbe.cpp
     src/platform/windows/EtwNetworkTap.cpp
     src/platform/windows/EtwParser.cpp
     src/platform/windows/InterfaceInspectorWin.cpp
     src/platform/windows/ProcessMonitorWin.cpp
+    src/platform/windows/PingProbeWin.cpp
+    src/platform/windows/RouteHelpersWin.cpp
     src/platform/windows/RouteResolverWin.cpp
+    src/platform/windows/TcpPingProbeWin.cpp
+    src/platform/windows/UdpProbeWin.cpp
     src/platform/windows/WinapiUtils.cpp
     src/ui/InterfacesPanel.cpp
     src/ui/KindIcon.cpp
@@ -37,16 +61,40 @@ set(GPD_HEADERS
     src/app/Application.h
     src/app/Logger.h
     src/core/ConnectionEnricher.h
+    src/core/ClashApiClient.h
+    src/core/ClashConnectionMatcher.h
+    src/core/diagnostic/AnchorPingProbe.h
+    src/core/diagnostic/BackgroundTrafficProbe.h
+    src/core/diagnostic/BufferbloatProbe.h
+    src/core/diagnostic/DiagnosticEngine.h
+    src/core/diagnostic/DiagnosticRuleEngine.h
+    src/core/diagnostic/DiagnosticTypes.h
+    src/core/diagnostic/IDiagnosticProbe.h
+    src/core/GeoIpResolver.h
     src/core/InterfaceClassifier.h
     src/core/Models.h
     src/core/RouteClassifier.h
+    src/core/TunnelCorrelator.h
+    src/core/TunnelProcessRegistry.h
+    src/core/PingAggregator.h
+    src/core/PingScheduler.h
     src/core/UdpFlowAggregator.h
     src/platform/windows/ConnectionScannerWin.h
+    src/platform/windows/diagnostic/AdapterErrorProbe.h
+    src/platform/windows/diagnostic/CpuPressureProbe.h
+    src/platform/windows/diagnostic/HopProbe.h
+    src/platform/windows/diagnostic/PacketLossProbe.h
+    src/platform/windows/diagnostic/VpnRouteProbe.h
+    src/platform/windows/diagnostic/WifiMetricsProbe.h
     src/platform/windows/EtwNetworkTap.h
     src/platform/windows/EtwParser.h
     src/platform/windows/InterfaceInspectorWin.h
     src/platform/windows/ProcessMonitorWin.h
+    src/platform/windows/PingProbeWin.h
+    src/platform/windows/RouteHelpersWin.h
     src/platform/windows/RouteResolverWin.h
+    src/platform/windows/TcpPingProbeWin.h
+    src/platform/windows/UdpProbeWin.h
     src/platform/windows/WinapiUtils.h
     src/ui/InterfacesPanel.h
     src/ui/KindIcon.h
@@ -85,8 +133,16 @@ target_link_libraries(RouteLensApp PUBLIC
     iphlpapi
     shell32
     tdh
+    wlanapi
     ws2_32
 )
+
+if(TARGET maxminddb::maxminddb)
+    target_link_libraries(RouteLensApp PUBLIC maxminddb::maxminddb)
+    target_compile_definitions(RouteLensApp PUBLIC GPD_HAS_MAXMINDDB=1)
+else()
+    message(WARNING "maxminddb not found; GeoIP resolver will be disabled for this build")
+endif()
 
 qt_add_executable(RouteLens WIN32
     src/app/main.cpp

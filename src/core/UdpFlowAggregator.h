@@ -17,6 +17,7 @@ public:
 
     void ingestBatch(const QVector<UdpFlowEvent>& events);
     [[nodiscard]] QVector<UdpEndpointObservation> endpointsFor(const UdpEndpointKey& key, std::int64_t freshnessMs = 30000) const;
+    [[nodiscard]] QHash<std::uint32_t, std::uint64_t> bandwidthBytesByPid(std::int64_t freshnessMs = 30000) const;
     void pruneOlderThan(std::int64_t cutoffMs);
 
 private:
