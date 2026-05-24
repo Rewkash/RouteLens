@@ -33,6 +33,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QMenuBar>
 #include <QDebug>
@@ -41,6 +42,7 @@
 #include <QPushButton>
 #include <QProgressBar>
 #include <QRegularExpression>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSet>
 #include <QUrl>
@@ -131,6 +133,16 @@ bool isLikelyNoiseProcess(const QString& rawName) {
         QStringLiteral("updateagent"),
     };
     return noise.contains(normalizeProcessName(rawName));
+}
+
+QString connectionRowKey(const gpd::core::ConnectionInfo& c) {
+    return QStringLiteral("%1|%2|%3|%4|%5|%6")
+        .arg(static_cast<int>(c.protocol))
+        .arg(c.pid)
+        .arg(c.remoteAddress)
+        .arg(c.remotePort)
+        .arg(c.localAddress)
+        .arg(c.localPort);
 }
 
 QStringList runningProcessNamesLower() {
@@ -738,6 +750,20 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
     lastConnections_ = result.connections;
     qInfo() << "RouteLens refresh pid" << result.selectedPid << "raw" << result.rawConnectionCount << "enriched" << result.connections.size()
             << "etw" << result.etwRunning;
+
+    QString savedSelectionKey;
+    if (auto* sel = connectionTable_->selectionModel(); sel != nullptr) {
+        const auto rows = sel->selectedRows();
+        if (!rows.isEmpty()) {
+            if (auto* item = connectionTable_->item(rows.first().row(), 0); item != nullptr) {
+                savedSelectionKey = item->data(Qt::UserRole).toString();
+            }
+        }
+    }
+    const int savedScrollValue = connectionTable_->verticalScrollBar() != nullptr
+        ? connectionTable_->verticalScrollBar()->value()
+        : 0;
+
     connectionTable_->setSortingEnabled(false);
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -781,6 +807,26 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
     }
     connectionTable_->setSortingEnabled(true);
     connectionTable_->sortItems(sortColumn_, sortOrder_);
+
+    if (!savedSelectionKey.isEmpty()) {
+        int matchedRow = -1;
+        for (int r = 0; r < connectionTable_->rowCount(); ++r) {
+            auto* item = connectionTable_->item(r, 0);
+            if (item != nullptr && item->data(Qt::UserRole).toString() == savedSelectionKey) {
+                matchedRow = r;
+                break;
+            }
+        }
+        if (matchedRow >= 0) {
+            connectionTable_->setCurrentCell(matchedRow, 0,
+                QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        } else {
+            connectionTable_->clearSelection();
+        }
+    }
+    if (connectionTable_->verticalScrollBar() != nullptr) {
+        connectionTable_->verticalScrollBar()->setValue(savedScrollValue);
+    }
 
     verdictBadge_->setVerdict(result.verdict);
     interfacesPanel_->setInterfaces(result.interfaces);
@@ -909,6 +955,9 @@ void MainWindow::fillConnectionRow(const int row, const gpd::core::ConnectionInf
     };
 
     setItem(0, connection.remoteAddress);
+    if (auto* keyItem = connectionTable_->item(row, 0); keyItem != nullptr) {
+        keyItem->setData(Qt::UserRole, connectionRowKey(connection));
+    }
     setItem(1, connection.remotePort == 0 ? QStringLiteral("-") : QString::number(connection.remotePort));
     setItem(2, gpd::core::protocolToString(connection.protocol));
     QString countryText = QStringLiteral("-");
