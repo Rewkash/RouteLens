@@ -46,14 +46,13 @@ bool AnchorPingProbe::start() {
     if (!gatewayIp.isEmpty()) {
         targets.push_back({gatewayIp, QString(), 0, false, false, false, gpd::platform::UdpProbePayload::Auto});
     }
-    targets.push_back({QStringLiteral("1.1.1.1"), QString(), 443, false, true, false, gpd::platform::UdpProbePayload::Auto});
-    targets.push_back({QStringLiteral("8.8.8.8"), QString(), 443, false, true, false, gpd::platform::UdpProbePayload::Auto});
-    targets.push_back({QStringLiteral("9.9.9.9"), QString(), 443, false, true, false, gpd::platform::UdpProbePayload::Auto});
-    targets.push_back({QStringLiteral("1.0.0.1"), QString(), 443, false, true, false, gpd::platform::UdpProbePayload::Auto});
+    targets.push_back({QStringLiteral("162.159.200.123"), QString(), 123, false, false, true, gpd::platform::UdpProbePayload::NtpQuery});
+    targets.push_back({QStringLiteral("216.239.35.0"), QString(), 123, false, false, true, gpd::platform::UdpProbePayload::NtpQuery});
+    targets.push_back({QStringLiteral("216.239.35.4"), QString(), 123, false, false, true, gpd::platform::UdpProbePayload::NtpQuery});
+    targets.push_back({QStringLiteral("132.163.97.4"), QString(), 123, false, false, true, gpd::platform::UdpProbePayload::NtpQuery});
     if (!targetIp_.isEmpty()) {
         targets.push_back({targetIp_, targetLocalAddress_, static_cast<std::uint16_t>(targetPort_), false, false, true,
                            gpd::platform::UdpProbePayload::SourceA2sInfo});
-        targets.push_back({targetIp_, QString(), 1, false, true, false, gpd::platform::UdpProbePayload::Auto});
     }
     scheduler_->updateAnchorTargets(targets);
     return true;
@@ -68,10 +67,10 @@ QVariantMap AnchorPingProbe::snapshot() const {
         return out;
     }
     const auto snap = scheduler_->snapshot();
-    out.insert(QStringLiteral("anchor_1_1_1_1"), toMap(snap.value(keyFor(QStringLiteral("1.1.1.1"), QString()))));
-    out.insert(QStringLiteral("anchor_8_8_8_8"), toMap(snap.value(keyFor(QStringLiteral("8.8.8.8"), QString()))));
-    out.insert(QStringLiteral("anchor_9_9_9_9"), toMap(snap.value(keyFor(QStringLiteral("9.9.9.9"), QString()))));
-    out.insert(QStringLiteral("anchor_1_0_0_1"), toMap(snap.value(keyFor(QStringLiteral("1.0.0.1"), QString()))));
+    out.insert(QStringLiteral("anchor_cf_ntp"), toMap(snap.value(keyFor(QStringLiteral("162.159.200.123"), QString()))));
+    out.insert(QStringLiteral("anchor_google_ntp_a"), toMap(snap.value(keyFor(QStringLiteral("216.239.35.0"), QString()))));
+    out.insert(QStringLiteral("anchor_google_ntp_b"), toMap(snap.value(keyFor(QStringLiteral("216.239.35.4"), QString()))));
+    out.insert(QStringLiteral("anchor_nist_ntp"), toMap(snap.value(keyFor(QStringLiteral("132.163.97.4"), QString()))));
     const QString gatewayIp = gpd::platform::findPhysicalDefaultGateway();
     if (!gatewayIp.isEmpty()) {
         out.insert(QStringLiteral("gateway"), toMap(snap.value(keyFor(gatewayIp, QString()))));
@@ -79,7 +78,6 @@ QVariantMap AnchorPingProbe::snapshot() const {
     }
     if (!targetIp_.isEmpty()) {
         out.insert(QStringLiteral("target"), toMap(snap.value(keyFor(targetIp_, targetLocalAddress_))));
-        out.insert(QStringLiteral("target_path_loss"), toMap(snap.value(keyFor(targetIp_, QString()))));
     }
     return out;
 }

@@ -14,6 +14,7 @@ enum class UdpProbePayload {
     DnsQuery,
     ClosedPortProbe,
     GenericRandom,
+    NtpQuery,
 };
 
 struct UdpProbeResult {
