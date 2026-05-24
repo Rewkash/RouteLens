@@ -23,6 +23,7 @@ private:
     QString targetIp_;
     int targetPort_{0};
     QString targetLocalAddress_;
+    QString physicalLocalIp_;
 };
 
 } // namespace gpd::core

@@ -205,26 +205,63 @@ DiagnosticSection DiagnosticRuleEngine::evaluateIsp(const QHash<QString, QVarian
     const double rttGa = mapNumber(aGa, QStringLiteral("rttMs"));
     const double lossCf = mapNumber(aCf, QStringLiteral("lossPercent"));
     const double lossGa = mapNumber(aGa, QStringLiteral("lossPercent"));
+    const double jitterCf = mapNumber(aCf, QStringLiteral("jitterMs"));
+    const double jitterGa = mapNumber(aGa, QStringLiteral("jitterMs"));
+    const double jitterGb = mapNumber(aGb, QStringLiteral("jitterMs"));
+    const double jitterNist = mapNumber(aNist, QStringLiteral("jitterMs"));
+    const QString physicalLocalIp = anchor.value(QStringLiteral("physicalLocalIp")).toString();
+    const QString headerSuffix = physicalLocalIp.isEmpty()
+        ? QStringLiteral("")
+        : QStringLiteral(" — direct path (bind %1)").arg(physicalLocalIp);
     section.findings.push_back(makeFinding(section.id,
-                                           QStringLiteral("Cloudflare NTP (162.159.200.123)"),
-                                           QStringLiteral("RTT %1 ms, loss %2%").arg(QString::number(rttCf, 'f', 1), QString::number(lossCf, 'f', 1)),
+                                           QStringLiteral("Cloudflare NTP (162.159.200.123)") + headerSuffix,
+                                           QStringLiteral("RTT %1 ms, jitter %2 ms, loss %3%")
+                                               .arg(QString::number(rttCf, 'f', 1),
+                                                    QString::number(jitterCf, 'f', 1),
+                                                    QString::number(lossCf, 'f', 1)),
                                            DiagnosticStatus::Info));
     section.findings.push_back(makeFinding(section.id,
                                            QStringLiteral("Google NTP (216.239.35.0)"),
-                                           QStringLiteral("RTT %1 ms, loss %2%").arg(QString::number(rttGa, 'f', 1), QString::number(lossGa, 'f', 1)),
+                                           QStringLiteral("RTT %1 ms, jitter %2 ms, loss %3%")
+                                               .arg(QString::number(rttGa, 'f', 1),
+                                                    QString::number(jitterGa, 'f', 1),
+                                                    QString::number(lossGa, 'f', 1)),
                                            DiagnosticStatus::Info));
     section.findings.push_back(makeFinding(section.id,
                                            QStringLiteral("Google NTP (216.239.35.4)"),
-                                           QStringLiteral("RTT %1 ms, loss %2%")
+                                           QStringLiteral("RTT %1 ms, jitter %2 ms, loss %3%")
                                                .arg(QString::number(mapNumber(aGb, QStringLiteral("rttMs")), 'f', 1),
+                                                    QString::number(jitterGb, 'f', 1),
                                                     QString::number(mapNumber(aGb, QStringLiteral("lossPercent")), 'f', 1)),
                                            DiagnosticStatus::Info));
     section.findings.push_back(makeFinding(section.id,
                                             QStringLiteral("NIST NTP (132.163.97.4)"),
-                                            QStringLiteral("RTT %1 ms, loss %2%")
+                                            QStringLiteral("RTT %1 ms, jitter %2 ms, loss %3%")
                                                 .arg(QString::number(mapNumber(aNist, QStringLiteral("rttMs")), 'f', 1),
+                                                     QString::number(jitterNist, 'f', 1),
                                                      QString::number(mapNumber(aNist, QStringLiteral("lossPercent")), 'f', 1)),
                                             DiagnosticStatus::Info));
+    double jitterSum = 0.0;
+    int jitterCount = 0;
+    for (const double j : {jitterCf, jitterGa, jitterGb, jitterNist}) {
+        if (j > 0.0) {
+            jitterSum += j;
+            ++jitterCount;
+        }
+    }
+    const double directJitterAvg = jitterCount > 0 ? jitterSum / static_cast<double>(jitterCount) : 0.0;
+    if (directJitterAvg > 20.0) {
+        section.findings.push_back(makeFinding(section.id,
+                                               QStringLiteral("Высокий джиттер на direct-якорях"),
+                                               QStringLiteral("Средний jitter на физическом интерфейсе: %1 ms").arg(QString::number(directJitterAvg, 'f', 1)),
+                                               DiagnosticStatus::Problem,
+                                               QStringLiteral("Проверьте Wi-Fi/роутер/CPU: проблема в last-mile, не на VPN.")));
+    } else if (directJitterAvg > 8.0) {
+        section.findings.push_back(makeFinding(section.id,
+                                               QStringLiteral("Заметный джиттер на direct-якорях"),
+                                               QStringLiteral("Средний jitter direct: %1 ms").arg(QString::number(directJitterAvg, 'f', 1)),
+                                               DiagnosticStatus::Warning));
+    }
     if (qAbs(rttCf - rttGa) > 50.0) {
         section.findings.push_back(makeFinding(section.id, QStringLiteral("RTT якорей сильно различается"),
                                                QStringLiteral("Cloudflare=%1 ms, Google=%2 ms").arg(QString::number(rttCf, 'f', 1), QString::number(rttGa, 'f', 1)),
@@ -265,10 +302,19 @@ DiagnosticSection DiagnosticRuleEngine::evaluateVpn(const QHash<QString, QVarian
     const bool fullTunnel = vpnRoute.value(QStringLiteral("fullTunnelDetected")).toBool();
     const bool clashNonDirect = ci != nullptr && ci->clashTracked && ci->clashOutbound.compare(QStringLiteral("DIRECT"), Qt::CaseInsensitive) != 0;
     const bool inferredVpn = ci != nullptr && (ci->routedThroughKind == InterfaceKind::VpnTunnel || clashNonDirect);
-    if (!fullTunnel && !inferredVpn) {
+    const auto tunnelLoadEarly = snapshots.value(QStringLiteral("tunnel_load"));
+    const bool tunnelInterfaceUp = tunnelLoadEarly.value(QStringLiteral("tunnelFound")).toBool();
+    const bool splitTunnelInferred = !fullTunnel && !inferredVpn && tunnelInterfaceUp;
+    if (!fullTunnel && !inferredVpn && !tunnelInterfaceUp) {
         section.overallStatus = DiagnosticStatus::Info;
         section.findings.push_back(makeFinding(section.id, QStringLiteral("Активный VPN-маршрут не обнаружен"), QStringLiteral("VPN-проверки пропущены"), DiagnosticStatus::Info));
         return section;
+    }
+    if (splitTunnelInferred) {
+        section.findings.push_back(makeFinding(section.id,
+                                               QStringLiteral("Split-tunnel: игра идёт мимо VPN"),
+                                               QStringLiteral("VPN-интерфейс активен, но игровой поток идёт direct. Сравниваем direct vs tunneled якоря."),
+                                               DiagnosticStatus::Info));
     }
     if (fullTunnel) {
         const auto d4 = nestedMap(vpnRoute, QStringLiteral("defaultIpv4"));
@@ -283,30 +329,96 @@ DiagnosticSection DiagnosticRuleEngine::evaluateVpn(const QHash<QString, QVarian
         section.findings.push_back(makeFinding(section.id, QStringLiteral("Обнаружен full-tunnel VPN"), metric, DiagnosticStatus::Info));
     }
     const auto anchor = snapshots.value(QStringLiteral("anchor_ping"));
+    const auto tunnelLoad = snapshots.value(QStringLiteral("tunnel_load"));
     const auto t = nestedMap(anchor, QStringLiteral("target"));
-    const auto a = nestedMap(anchor, QStringLiteral("anchor_cf_ntp"));
-    if (t.isEmpty() || a.isEmpty()) {
-        section.overallStatus = DiagnosticStatus::Unknown;
-        return section;
+    const auto aDirect = nestedMap(anchor, QStringLiteral("anchor_cf_ntp"));
+    const auto aTunneled = nestedMap(anchor, QStringLiteral("anchor_cf_ntp_tunneled"));
+
+    if (!aDirect.isEmpty() && !aTunneled.isEmpty()) {
+        const double rttDirect = mapNumber(aDirect, QStringLiteral("rttMs"));
+        const double rttTunneled = mapNumber(aTunneled, QStringLiteral("rttMs"));
+        const double jitDirect = mapNumber(aDirect, QStringLiteral("jitterMs"));
+        const double jitTunneled = mapNumber(aTunneled, QStringLiteral("jitterMs"));
+        const double rttOverhead = rttTunneled - rttDirect;
+        const double jitOverhead = jitTunneled - jitDirect;
+        if (rttDirect > 0.0 && rttTunneled > 0.0) {
+            section.findings.push_back(makeFinding(
+                section.id,
+                QStringLiteral("VPN накладные расходы (Cloudflare NTP)"),
+                QStringLiteral("Direct %1 ms -> Tunneled %2 ms (дельта +%3 ms), jitter direct %4 ms -> tunneled %5 ms")
+                    .arg(QString::number(rttDirect, 'f', 1),
+                         QString::number(rttTunneled, 'f', 1),
+                         QString::number(rttOverhead, 'f', 1),
+                         QString::number(jitDirect, 'f', 1),
+                         QString::number(jitTunneled, 'f', 1)),
+                rttOverhead > 100.0 ? DiagnosticStatus::Warning : DiagnosticStatus::Info));
+        }
+        if (jitOverhead > 15.0 && jitTunneled > 20.0) {
+            section.findings.push_back(makeFinding(section.id,
+                                                   QStringLiteral("VPN добавляет джиттер"),
+                                                   QStringLiteral("Delta jitter: +%1 ms (direct %2 ms, tunneled %3 ms)")
+                                                       .arg(QString::number(jitOverhead, 'f', 1),
+                                                            QString::number(jitDirect, 'f', 1),
+                                                            QString::number(jitTunneled, 'f', 1)),
+                                                   DiagnosticStatus::Problem,
+                                                   QStringLiteral("Проблема на стороне VPN. Попробуйте другой сервер или протокол.")));
+        }
     }
-    const double jitterDelta = mapNumber(t, QStringLiteral("jitterMs")) - mapNumber(a, QStringLiteral("jitterMs"));
-    const double rttDelta = mapNumber(t, QStringLiteral("rttMs")) - mapNumber(a, QStringLiteral("rttMs"));
-    if (rttDelta > 0.0) {
-        section.findings.push_back(makeFinding(
-            section.id,
-            QStringLiteral("Расстояние до игрового сервера через VPN"),
-            QStringLiteral("Anchor (Cloudflare NTP) %1 ms -> Game server %2 ms (delta +%3 ms)")
-                .arg(QString::number(mapNumber(a, QStringLiteral("rttMs"), -1.0), 'f', 1),
-                     QString::number(mapNumber(t, QStringLiteral("rttMs"), -1.0), 'f', 1),
-                     QString::number(rttDelta, 'f', 1)),
-            DiagnosticStatus::Info));
+
+    if (!tunnelLoad.isEmpty()) {
+        const bool tunnelFound = tunnelLoad.value(QStringLiteral("tunnelFound")).toBool();
+        const double tunOut = mapNumber(tunnelLoad, QStringLiteral("tunnelOutMbps"));
+        const double tunIn = mapNumber(tunnelLoad, QStringLiteral("tunnelInMbps"));
+        const double physOut = mapNumber(tunnelLoad, QStringLiteral("physicalOutMbps"));
+        const double physIn = mapNumber(tunnelLoad, QStringLiteral("physicalInMbps"));
+        const QString tunnelName = tunnelLoad.value(QStringLiteral("tunnelName")).toString();
+        const QString physName = tunnelLoad.value(QStringLiteral("physicalName")).toString();
+        if (tunnelFound) {
+            section.findings.push_back(makeFinding(section.id,
+                                                   QStringLiteral("Пропускная способность VPN-интерфейса"),
+                                                   QStringLiteral("%1: %2 Mbps out, %3 Mbps in")
+                                                       .arg(tunnelName.isEmpty() ? QStringLiteral("tunnel") : tunnelName,
+                                                            QString::number(tunOut, 'f', 2),
+                                                            QString::number(tunIn, 'f', 2)),
+                                                   DiagnosticStatus::Info));
+            const bool heavyUp = tunOut > 4.0;
+            const bool heavyDown = tunIn > 20.0;
+            if (heavyUp || heavyDown) {
+                section.findings.push_back(makeFinding(section.id,
+                                                       QStringLiteral("VPN-трафик нагружает канал"),
+                                                       QStringLiteral("Через туннель %1 Mbps out / %2 Mbps in. Делит очередь с игровым трафиком.")
+                                                           .arg(QString::number(tunOut, 'f', 2), QString::number(tunIn, 'f', 2)),
+                                                       DiagnosticStatus::Warning,
+                                                       QStringLiteral("Поставьте на паузу загрузки/стримы в tunneled-процессах.")));
+            }
+        }
+        if (physOut > 0.0 || physIn > 0.0) {
+            section.findings.push_back(makeFinding(section.id,
+                                                   QStringLiteral("Суммарная пропускная способность физического адаптера"),
+                                                   QStringLiteral("%1: %2 Mbps out, %3 Mbps in")
+                                                       .arg(physName.isEmpty() ? QStringLiteral("physical") : physName,
+                                                            QString::number(physOut, 'f', 2),
+                                                            QString::number(physIn, 'f', 2)),
+                                                   DiagnosticStatus::Info));
+        }
     }
-    if (jitterDelta > 20.0) {
-        section.findings.push_back(makeFinding(section.id, QStringLiteral("VPN добавляет джиттер"),
-                                               QStringLiteral("Delta jitter: +%1 ms").arg(QString::number(jitterDelta, 'f', 1)),
-                                               DiagnosticStatus::Problem,
-                                               QStringLiteral("Попробуйте другой VPN-сервер.")));
+
+    if (!t.isEmpty() && !aTunneled.isEmpty()) {
+        const double rttTarget = mapNumber(t, QStringLiteral("rttMs"));
+        const double rttTunneled = mapNumber(aTunneled, QStringLiteral("rttMs"));
+        if (rttTarget > 0.0 && rttTunneled > 0.0) {
+            const double rttGameDelta = rttTarget - rttTunneled;
+            section.findings.push_back(makeFinding(
+                section.id,
+                QStringLiteral("Расстояние до игрового сервера через VPN"),
+                QStringLiteral("Tunneled anchor %1 ms -> Game %2 ms (дельта +%3 ms)")
+                    .arg(QString::number(rttTunneled, 'f', 1),
+                         QString::number(rttTarget, 'f', 1),
+                         QString::number(rttGameDelta, 'f', 1)),
+                DiagnosticStatus::Info));
+        }
     }
+
     if (section.findings.isEmpty()) {
         section.findings.push_back(makeFinding(section.id, QStringLiteral("VPN-путь выглядит приемлемо"), QStringLiteral("Существенных VPN-аномалий не обнаружено"), DiagnosticStatus::Ok));
     }

@@ -96,7 +96,7 @@ void PingScheduler::scheduleForMap(QHash<QString, TargetState>& map, const std::
         state.lastProbeMs = nowMs;
         ++pendingProbes_;
         if (state.preferUdp) {
-            udpProbe_->enqueue(state.key, state.ip, state.portForTcpFallback, state.udpPayload, 1500);
+            udpProbe_->enqueue(state.key, state.ip, state.portForTcpFallback, state.udpPayload, 1500, state.localAddress);
         } else if (state.preferTcp || state.icmpBlocked) {
             tcpProbe_->enqueue(state.key, state.ip, state.localAddress, state.portForTcpFallback == 0 ? 443 : state.portForTcpFallback, 700);
         } else {

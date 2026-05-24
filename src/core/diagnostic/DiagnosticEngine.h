@@ -25,6 +25,7 @@ class BackgroundTrafficProbe;
 class BufferbloatProbe;
 class PingScheduler;
 class IDiagnosticProbe;
+class TunnelLoadProbe;
 class UdpFlowAggregator;
 
 class DiagnosticEngine final : public QObject {
@@ -60,6 +61,7 @@ private:
     std::unique_ptr<IDiagnosticProbe> wifiProbe_;
     std::unique_ptr<IDiagnosticProbe> cpuProbe_;
     std::unique_ptr<IDiagnosticProbe> vpnRouteProbe_;
+    std::unique_ptr<TunnelLoadProbe> tunnelLoadProbe_;
     DiagnosticRuleEngine ruleEngine_;
     QTimer* timer_{nullptr};
     QHash<QString, QVariantMap> snapshots_;
