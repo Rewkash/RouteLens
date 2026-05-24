@@ -83,6 +83,56 @@ constexpr double kUdpQueueDelayFactor = 3.5;
 constexpr double kUdpJitterAmplification = 4.0;
 constexpr double kVpnTunnelRttFactor = 2.2;
 
+QString normalizeProcessName(const QString& rawName) {
+    QString n = rawName.trimmed().toLower();
+    const int slash = qMax(n.lastIndexOf(QLatin1Char('/')), n.lastIndexOf(QLatin1Char('\\')));
+    if (slash >= 0 && slash + 1 < n.size()) {
+        n = n.mid(slash + 1);
+    }
+    if (n.endsWith(QStringLiteral(".exe"))) {
+        n.chop(4);
+    }
+    return n;
+}
+
+bool isLikelyNoiseProcess(const QString& rawName) {
+    static const QSet<QString> noise = {
+        // Windows system / service host
+        QStringLiteral("system"), QStringLiteral("registry"), QStringLiteral("smss"),
+        QStringLiteral("csrss"), QStringLiteral("wininit"), QStringLiteral("services"),
+        QStringLiteral("lsass"), QStringLiteral("lsm"), QStringLiteral("winlogon"),
+        QStringLiteral("fontdrvhost"), QStringLiteral("dwm"), QStringLiteral("svchost"),
+        QStringLiteral("spoolsv"), QStringLiteral("searchindexer"), QStringLiteral("searchhost"),
+        QStringLiteral("searchprotocolhost"), QStringLiteral("searchfilterhost"),
+        QStringLiteral("runtimebroker"), QStringLiteral("shellexperiencehost"),
+        QStringLiteral("startmenuexperiencehost"), QStringLiteral("applicationframehost"),
+        QStringLiteral("taskhostw"), QStringLiteral("audiodg"), QStringLiteral("conhost"),
+        QStringLiteral("explorer"), QStringLiteral("ctfmon"), QStringLiteral("sihost"),
+        QStringLiteral("rundll32"), QStringLiteral("dllhost"), QStringLiteral("wmiprvse"),
+        QStringLiteral("wuauclt"), QStringLiteral("trustedinstaller"), QStringLiteral("tiworker"),
+        QStringLiteral("musnotifyicon"), QStringLiteral("musnotification"),
+        QStringLiteral("backgroundtaskhost"), QStringLiteral("useroobebroker"),
+        QStringLiteral("ngc"), QStringLiteral("wsappx"), QStringLiteral("winstore.app"),
+        // Microsoft Defender / SmartScreen / OneDrive
+        QStringLiteral("msmpeng"), QStringLiteral("nissrv"), QStringLiteral("smartscreen"),
+        QStringLiteral("securityhealthservice"), QStringLiteral("securityhealthsystray"),
+        QStringLiteral("onedrive"), QStringLiteral("onedrivesetup"),
+        // Microsoft Edge runtime (webview / system component)
+        QStringLiteral("msedge"), QStringLiteral("msedgewebview2"),
+        // Browsers (обычно не нужны для диагностики игры)
+        QStringLiteral("chrome"), QStringLiteral("firefox"), QStringLiteral("opera"),
+        QStringLiteral("opera_gx"), QStringLiteral("brave"), QStringLiteral("vivaldi"),
+        QStringLiteral("yandex"), QStringLiteral("iexplore"), QStringLiteral("browser"),
+        // Updaters / telemetry
+        QStringLiteral("googleupdate"), QStringLiteral("googlecrashhandler"),
+        QStringLiteral("googlecrashhandler64"), QStringLiteral("yandexupdate"),
+        QStringLiteral("operaupdater"), QStringLiteral("edgeupdate"), QStringLiteral("edgeupdater"),
+        QStringLiteral("compattelrunner"), QStringLiteral("telemetry"),
+        QStringLiteral("updateagent"),
+    };
+    return noise.contains(normalizeProcessName(rawName));
+}
+
 QStringList runningProcessNamesLower() {
     QProcess process;
     process.start(QStringLiteral("tasklist"), {QStringLiteral("/FO"), QStringLiteral("CSV"), QStringLiteral("/NH")});
@@ -529,6 +579,12 @@ void MainWindow::refreshProcesses() {
     for (const auto& process : processes) {
         const int count = activeCounts.value(process.pid, 0);
         if (count <= 0) {
+            continue;
+        }
+        if (isLikelyNoiseProcess(process.name)) {
+            continue;
+        }
+        if (gpd::core::TunnelProcessRegistry::isKnownTunnel(process.name)) {
             continue;
         }
         processCombo_->addItem(
