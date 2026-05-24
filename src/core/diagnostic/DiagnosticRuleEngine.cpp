@@ -1,6 +1,7 @@
 #include "core/diagnostic/DiagnosticRuleEngine.h"
 
 #include <QDateTime>
+#include <QStringList>
 
 namespace gpd::core {
 
@@ -262,17 +263,41 @@ DiagnosticSection DiagnosticRuleEngine::evaluateIsp(const QHash<QString, QVarian
                                                QStringLiteral("Средний jitter direct: %1 ms").arg(QString::number(directJitterAvg, 'f', 1)),
                                                DiagnosticStatus::Warning));
     }
-    if (qAbs(rttCf - rttGa) > 50.0) {
+    const double lossGb = mapNumber(aGb, QStringLiteral("lossPercent"));
+    const double lossNist = mapNumber(aNist, QStringLiteral("lossPercent"));
+    int reachableCount = 0;
+    int lossyCount = 0;
+    for (const double loss : {lossCf, lossGa, lossGb, lossNist}) {
+        if (loss < 100.0) {
+            ++reachableCount;
+        }
+        if (loss > 5.0) {
+            ++lossyCount;
+        }
+    }
+    const bool rttCfValid = rttCf > 0.0 && lossCf < 50.0;
+    const bool rttGaValid = rttGa > 0.0 && lossGa < 50.0;
+    if (rttCfValid && rttGaValid && qAbs(rttCf - rttGa) > 50.0) {
         section.findings.push_back(makeFinding(section.id, QStringLiteral("RTT якорей сильно различается"),
                                                QStringLiteral("Cloudflare=%1 ms, Google=%2 ms").arg(QString::number(rttCf, 'f', 1), QString::number(rttGa, 'f', 1)),
                                                DiagnosticStatus::Warning,
                                                QStringLiteral("Возможно асимметричная маршрутизация или peering-проблема у провайдера/VPN.")));
     }
-    if (lossCf > 1.0 || lossGa > 1.0) {
-        section.findings.push_back(makeFinding(section.id, QStringLiteral("Есть потери на интернет-якорях"),
-                                               QStringLiteral("Loss: %1% / %2%").arg(QString::number(lossCf, 'f', 1), QString::number(lossGa, 'f', 1)),
+    if (lossyCount >= 3) {
+        section.findings.push_back(makeFinding(section.id, QStringLiteral("Потери на большинстве интернет-якорей"),
+                                               QStringLiteral("Якорей с заметными потерями: %1 из 4").arg(lossyCount),
                                                DiagnosticStatus::Problem,
                                                QStringLiteral("Потери, вероятно, вне локальной сети или на стороне VPN.")));
+    } else if (lossyCount >= 1 && reachableCount >= 3) {
+        QStringList lossy;
+        if (lossCf > 5.0) lossy << QStringLiteral("Cloudflare %1%").arg(QString::number(lossCf, 'f', 0));
+        if (lossGa > 5.0) lossy << QStringLiteral("Google-A %1%").arg(QString::number(lossGa, 'f', 0));
+        if (lossGb > 5.0) lossy << QStringLiteral("Google-B %1%").arg(QString::number(lossGb, 'f', 0));
+        if (lossNist > 5.0) lossy << QStringLiteral("NIST %1%").arg(QString::number(lossNist, 'f', 0));
+        section.findings.push_back(makeFinding(section.id,
+                                               QStringLiteral("Часть NTP-якорей не отвечает"),
+                                               QStringLiteral("%1 — вероятно блок/throttle на стороне сервера, остальные якоря работают.").arg(lossy.join(QStringLiteral(", "))),
+                                               DiagnosticStatus::Info));
     }
     const auto hop = snapshots.value(QStringLiteral("hop_probe"));
     if (!hop.isEmpty()) {
