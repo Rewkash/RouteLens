@@ -33,6 +33,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QMenuBar>
 #include <QDebug>
@@ -41,6 +42,7 @@
 #include <QPushButton>
 #include <QProgressBar>
 #include <QRegularExpression>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSet>
 #include <QUrl>
@@ -82,6 +84,80 @@ constexpr double kUdpBaseRttFactor = 4.0;
 constexpr double kUdpQueueDelayFactor = 3.5;
 constexpr double kUdpJitterAmplification = 4.0;
 constexpr double kVpnTunnelRttFactor = 2.2;
+
+QString normalizeProcessName(const QString& rawName) {
+    QString n = rawName.trimmed().toLower();
+    const int slash = qMax(n.lastIndexOf(QLatin1Char('/')), n.lastIndexOf(QLatin1Char('\\')));
+    if (slash >= 0 && slash + 1 < n.size()) {
+        n = n.mid(slash + 1);
+    }
+    if (n.endsWith(QStringLiteral(".exe"))) {
+        n.chop(4);
+    }
+    return n;
+}
+
+bool isLikelyNoiseProcess(const QString& rawName) {
+    static const QSet<QString> noise = {
+        // Windows system / service host
+        QStringLiteral("system"), QStringLiteral("registry"), QStringLiteral("smss"),
+        QStringLiteral("csrss"), QStringLiteral("wininit"), QStringLiteral("services"),
+        QStringLiteral("lsass"), QStringLiteral("lsm"), QStringLiteral("winlogon"),
+        QStringLiteral("fontdrvhost"), QStringLiteral("dwm"), QStringLiteral("svchost"),
+        QStringLiteral("spoolsv"), QStringLiteral("searchindexer"), QStringLiteral("searchhost"),
+        QStringLiteral("searchprotocolhost"), QStringLiteral("searchfilterhost"),
+        QStringLiteral("runtimebroker"), QStringLiteral("shellexperiencehost"),
+        QStringLiteral("startmenuexperiencehost"), QStringLiteral("applicationframehost"),
+        QStringLiteral("taskhostw"), QStringLiteral("audiodg"), QStringLiteral("conhost"),
+        QStringLiteral("explorer"), QStringLiteral("ctfmon"), QStringLiteral("sihost"),
+        QStringLiteral("rundll32"), QStringLiteral("dllhost"), QStringLiteral("wmiprvse"),
+        QStringLiteral("wuauclt"), QStringLiteral("trustedinstaller"), QStringLiteral("tiworker"),
+        QStringLiteral("musnotifyicon"), QStringLiteral("musnotification"),
+        QStringLiteral("backgroundtaskhost"), QStringLiteral("useroobebroker"),
+        QStringLiteral("ngc"), QStringLiteral("wsappx"), QStringLiteral("winstore.app"),
+        // Microsoft Defender / SmartScreen / OneDrive
+        QStringLiteral("msmpeng"), QStringLiteral("nissrv"), QStringLiteral("smartscreen"),
+        QStringLiteral("securityhealthservice"), QStringLiteral("securityhealthsystray"),
+        QStringLiteral("onedrive"), QStringLiteral("onedrivesetup"),
+        // Microsoft Edge runtime (webview / system component)
+        QStringLiteral("msedge"), QStringLiteral("msedgewebview2"),
+        // Browsers (обычно не нужны для диагностики игры)
+        QStringLiteral("chrome"), QStringLiteral("firefox"), QStringLiteral("opera"),
+        QStringLiteral("opera_gx"), QStringLiteral("brave"), QStringLiteral("vivaldi"),
+        QStringLiteral("yandex"), QStringLiteral("iexplore"), QStringLiteral("browser"),
+        // Updaters / telemetry
+        QStringLiteral("googleupdate"), QStringLiteral("googlecrashhandler"),
+        QStringLiteral("googlecrashhandler64"), QStringLiteral("yandexupdate"),
+        QStringLiteral("operaupdater"), QStringLiteral("edgeupdate"), QStringLiteral("edgeupdater"),
+        QStringLiteral("compattelrunner"), QStringLiteral("telemetry"),
+        QStringLiteral("updateagent"),
+    };
+    return noise.contains(normalizeProcessName(rawName));
+}
+
+QString connectionRowKey(const gpd::core::ConnectionInfo& c) {
+    return QStringLiteral("%1|%2|%3|%4|%5|%6")
+        .arg(static_cast<int>(c.protocol))
+        .arg(c.pid)
+        .arg(c.remoteAddress)
+        .arg(c.remotePort)
+        .arg(c.localAddress)
+        .arg(c.localPort);
+}
+
+bool isDisplayableConnection(const gpd::core::ConnectionInfo& c) {
+    if (!c.hasRemoteEndpoint) {
+        return false;
+    }
+    const QString remote = c.remoteAddress.trimmed();
+    if (remote.isEmpty() || remote == QStringLiteral("-")) {
+        return false;
+    }
+    if (remote.startsWith(QLatin1Char('('))) {
+        return false;
+    }
+    return true;
+}
 
 QStringList runningProcessNamesLower() {
     QProcess process;
@@ -531,6 +607,12 @@ void MainWindow::refreshProcesses() {
         if (count <= 0) {
             continue;
         }
+        if (isLikelyNoiseProcess(process.name)) {
+            continue;
+        }
+        if (gpd::core::TunnelProcessRegistry::isKnownTunnel(process.name)) {
+            continue;
+        }
         processCombo_->addItem(
             QStringLiteral("%1 (%2) - %3").arg(process.name).arg(process.pid).arg(tr("соединений: %1").arg(count)),
             QVariant::fromValue(process.pid));
@@ -682,6 +764,20 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
     lastConnections_ = result.connections;
     qInfo() << "RouteLens refresh pid" << result.selectedPid << "raw" << result.rawConnectionCount << "enriched" << result.connections.size()
             << "etw" << result.etwRunning;
+
+    QString savedSelectionKey;
+    if (auto* sel = connectionTable_->selectionModel(); sel != nullptr) {
+        const auto rows = sel->selectedRows();
+        if (!rows.isEmpty()) {
+            if (auto* item = connectionTable_->item(rows.first().row(), 0); item != nullptr) {
+                savedSelectionKey = item->data(Qt::UserRole).toString();
+            }
+        }
+    }
+    const int savedScrollValue = connectionTable_->verticalScrollBar() != nullptr
+        ? connectionTable_->verticalScrollBar()->value()
+        : 0;
+
     connectionTable_->setSortingEnabled(false);
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -719,12 +815,40 @@ void MainWindow::applyRefreshResult(const RefreshResult& result) {
         state.lastUpdateMs = nowMs;
     }
 
-    connectionTable_->setRowCount(result.connections.size());
-    for (int row = 0; row < result.connections.size(); ++row) {
-        fillConnectionRow(row, result.connections[row]);
+    QVector<const gpd::core::ConnectionInfo*> displayedConnections;
+    displayedConnections.reserve(result.connections.size());
+    for (const auto& c : result.connections) {
+        if (isDisplayableConnection(c)) {
+            displayedConnections.push_back(&c);
+        }
+    }
+
+    connectionTable_->setRowCount(displayedConnections.size());
+    for (int row = 0; row < displayedConnections.size(); ++row) {
+        fillConnectionRow(row, *displayedConnections[row]);
     }
     connectionTable_->setSortingEnabled(true);
     connectionTable_->sortItems(sortColumn_, sortOrder_);
+
+    if (!savedSelectionKey.isEmpty()) {
+        int matchedRow = -1;
+        for (int r = 0; r < connectionTable_->rowCount(); ++r) {
+            auto* item = connectionTable_->item(r, 0);
+            if (item != nullptr && item->data(Qt::UserRole).toString() == savedSelectionKey) {
+                matchedRow = r;
+                break;
+            }
+        }
+        if (matchedRow >= 0) {
+            connectionTable_->setCurrentCell(matchedRow, 0,
+                QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        } else {
+            connectionTable_->clearSelection();
+        }
+    }
+    if (connectionTable_->verticalScrollBar() != nullptr) {
+        connectionTable_->verticalScrollBar()->setValue(savedScrollValue);
+    }
 
     verdictBadge_->setVerdict(result.verdict);
     interfacesPanel_->setInterfaces(result.interfaces);
@@ -853,6 +977,9 @@ void MainWindow::fillConnectionRow(const int row, const gpd::core::ConnectionInf
     };
 
     setItem(0, connection.remoteAddress);
+    if (auto* keyItem = connectionTable_->item(row, 0); keyItem != nullptr) {
+        keyItem->setData(Qt::UserRole, connectionRowKey(connection));
+    }
     setItem(1, connection.remotePort == 0 ? QStringLiteral("-") : QString::number(connection.remotePort));
     setItem(2, gpd::core::protocolToString(connection.protocol));
     QString countryText = QStringLiteral("-");
